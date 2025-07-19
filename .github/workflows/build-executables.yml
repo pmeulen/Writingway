@@ -36,7 +36,7 @@ jobs:
       continue-on-error: true  # Allow the workflow to continue even if this fails
 
     - name: Display MacPorts build log on failure
-      if: steps.macports-setup.outcome == 'failure'
+      if: steps.setup-macports.outcome == 'failure'
       run: |
         echo "=== MacPorts build log ==="
         cat $(port logfile portaudio)
