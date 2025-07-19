@@ -23,12 +23,13 @@ jobs:
     env:
       MAIN_PY_FILE: 'main.py'  # path to main.py file
 
-    steps:      
-      # portaudio is required for pyaudio
-    - name: Install PortAudio (macOS)
-      if: matrix.os == 'macos-latest'
-      run: brew install --universal portaudio 
-      
+    steps:
+      # Install macports to build a universal version of portaudio
+    - name: Setup MacPorts (macOS)
+      uses: melusina-org/setup-macports@v1
+      with:
+        parameters: '.github/parameters/setup-macports.yaml'
+              
     - name: Checkout code
       uses: actions/checkout@v4
 
@@ -56,9 +57,12 @@ jobs:
         # Install everything except native packages that need universal2
         pip install -r <(grep -v pyaudio requirements.txt)
 
+        # Enable universal builds
         export ARCHFLAGS="-arch arm64 -arch x86_64"
-        export CPPFLAGS="-I$(brew --prefix portaudio)/include"
-        export LDFLAGS="-L$(brew --prefix portaudio)/lib"
+
+        # Add macports includes
+        export CPPFLAGS="-I/opt/local/include"
+        export LDFLAGS="-L/opt/local/lib"
 
         # Build native packages that need universal2
         pip install --no-binary=pyaudio pyaudio
