@@ -31,8 +31,20 @@ jobs:
     - name: Setup MacPorts (macOS)
       uses: melusina-org/setup-macports@v1
       with:
-        parameters: '.github/parameters/setup-macports.yaml'            
+        parameters: '.github/parameters/setup-macports.yaml'      
+        continue-on-error: true  # Allow the workflow to continue even if this fails
 
+    - name: Display MacPorts build log on failure
+      if: failure()  # Only run if the previous step failed
+      run: |
+        echo "=== MacPorts build log ==="
+        if [ -f "/opt/local/var/macports/logs/_opt_local_var_macports_sources_rsync.macports.org_macports_release_tarballs_ports_audio_portaudio/portaudio/main.log" ]; then
+          cat "/opt/local/var/macports/logs/_opt_local_var_macports_sources_rsync.macports.org_macports_release_tarballs_ports_audio_portaudio/portaudio/main.log"
+        else
+          echo "Log file not found, listing available logs:"
+          find /opt/local/var/macports/logs -name "*.log" -type f 2>/dev/null || echo "No log files found"
+        fi
+    
     - name: Set up Python
       uses: actions/setup-python@v5
       # Python version is read from .python-version
