@@ -29,6 +29,7 @@ jobs:
       
       # Install macports to build a universal version of portaudio
     - name: Setup MacPorts (macOS)
+      id: setup-macports
       uses: melusina-org/setup-macports@v1
       with:
         parameters: '.github/parameters/setup-macports.yaml'      
