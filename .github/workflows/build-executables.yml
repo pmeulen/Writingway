@@ -47,9 +47,22 @@ jobs:
         pip install pyinstaller
       working-directory: ./
 
-    - name: Build executable
+    - name: Build executable (Windows)
+      if: matrix.os == 'windows-latest'
       run: |
         pyinstaller ${{ env.MAIN_PY_FILE }}
+      working-directory: ./
+       
+    - name: Build executable (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        pyinstaller ${{ env.MAIN_PY_FILE }}
+      working-directory: ./
+
+    - name: Build executable (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        pyinstaller ${{ env.MAIN_PY_FILE }} --hidden-import=pyaudio --collect-all=pyaudio
       working-directory: ./
 
     - name: Create Artifact (Windows)
