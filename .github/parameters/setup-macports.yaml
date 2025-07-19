@@ -1,0 +1,4 @@
+prefix: '/opt/local'
+ports:
+  - name: portaudio
+    select: [ universal ]
