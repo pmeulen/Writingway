@@ -1,0 +1,73 @@
+# Build executables using pyinstaller
+# Script based on https://github.com/NotCookey/Pyinstaller-Github-Actions
+
+name: Build Executables
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+         - macos-latest                  
+         # - ubuntu-latest
+         # - windows-latest
+
+    env:
+      MAIN_PY_FILE: 'main.py'  # path to main.py file
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      # Python version is read from .python-version
+      # with:
+      #  python-version: 3.11.x
+
+    - name: Install Python dependencies
+      run: |
+        pip install -r requirements.txt
+      working-directory: ./
+
+    - name: Install PyInstaller
+      run: |
+        pip install pyinstaller
+      working-directory: ./
+
+    - name: Build executable
+      run: |
+        pyinstaller ${{ env.MAIN_PY_FILE }}
+      working-directory: ./
+
+    - name: Create Artifact (Windows)
+      if: matrix.os == 'windows-latest'
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-executables
+        path: dist/
+
+    - name: Create Artifact (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      uses: actions/upload-artifact@v4
+      with:
+        name: linux-executables
+        path: dist/
+
+    - name: Create Artifact (macOS)
+      if: matrix.os == 'macos-latest'
+      uses: actions/upload-artifact@v4
+      with:
+        name: macos-executables
+        path: dist/
+
+    - name: List files in dist folder
+      run: ls -R ./dist/
