@@ -5,3 +5,4 @@ variants:
 ports:
   - name: portaudio
     select: [ universal ]
+    deselect: [ cxx ]
