@@ -24,6 +24,10 @@ jobs:
       MAIN_PY_FILE: 'main.py'  # path to main.py file
 
     steps:
+      # portaudio is required for pyaudio
+    - name: Install PortAudio
+      run: brew install portaudio 
+      
     - name: Checkout code
       uses: actions/checkout@v4
 
