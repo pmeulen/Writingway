@@ -24,14 +24,14 @@ jobs:
       MAIN_PY_FILE: 'main.py'  # path to main.py file
 
     steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
       # Install macports to build a universal version of portaudio
     - name: Setup MacPorts (macOS)
       uses: melusina-org/setup-macports@v1
       with:
-        parameters: '.github/parameters/setup-macports.yaml'
-              
-    - name: Checkout code
-      uses: actions/checkout@v4
+        parameters: '.github/parameters/setup-macports.yaml'            
 
     - name: Set up Python
       uses: actions/setup-python@v5
