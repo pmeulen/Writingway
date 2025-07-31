@@ -181,4 +181,4 @@ class ProjectTreeWidget(QWidget):
 
     def show_error_message(self, message):
         """Display an error message to the user."""
-        QMessageBox
+        QMessageBox.warning(self, _("Duplicate Name Error"), message)

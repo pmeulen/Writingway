@@ -38,16 +38,15 @@ def load_structure(project_name):
     Load the project structure from the file.
     If the file is missing or in an unexpected format, return a default structure.
     """
-    # The words "This is the summary" have special meaning, so we can't localize them
     structure = {"acts": [
-        {"name": "Act 1", "summary": "This is the summary for Act 1.",
-        "chapters": [
-            {"name": "Chapter 1", "summary": "This is the summary for Chapter 1.",
-            "scenes": [
-                {"name": "Scene 1"}
-            ]
-            }
-        ]
+        {"name": "Act 1", "summary": "This is the summary for Act 1.", "has_summary": False,
+         "chapters": [
+             {"name": "Chapter 1", "summary": "This is the summary for Chapter 1.", "has_summary": False,
+              "scenes": [
+                  {"name": "Scene 1"}
+              ]
+             }
+         ]
         }
     ]}
     file_path = get_structure_file_path(project_name, True)
@@ -55,14 +54,16 @@ def load_structure(project_name):
         with open(file_path, "r", encoding="utf-8") as f:
             structure = json.load(f)
         
-        # Add UUIDs to existing nodes
-        def add_uuids(node):
+        # Add UUIDs and has_summary to existing nodes
+        def add_fields(node):
             if "uuid" not in node:
                 node["uuid"] = str(uuid.uuid4())
+            if "summary" in node and "has_summary" not in node:
+                node["has_summary"] = not node["summary"].startswith("This is the summary")
             for child in node.get("chapters", []) + node.get("scenes", []):
-                add_uuids(child)
+                add_fields(child)
         for act in structure.get("acts", []):
-            add_uuids(act)
+            add_fields(act)
         save_structure(project_name, structure)
     return structure
 
@@ -85,12 +86,14 @@ def populate_tree(tree, structure):
     """
     def ensure_dict(node):
         if not isinstance(node, dict):
-            return {"name": str(node), "uuid": str(uuid.uuid4())}
+            return {"name": str(node), "uuid": str(uuid.uuid4()), "has_summary": False}
         # Ensure a "name" key exists.
         if "name" not in node:
             node["name"] = "Unnamed"
         if "uuid" not in node:
             node["uuid"] = str(uuid.uuid4())
+        if "summary" in node and "has_summary" not in node:
+            node["has_summary"] = not node["summary"].startswith("This is the summary")
         return node
 
     tree.clear()

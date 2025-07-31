@@ -535,7 +535,20 @@ class SettingsManager:
     def get_project_relpath(self, project_name = "", file = ""):
         """Return the relative path to the project directory and desanitze any filename therein."""
         return os.path.join("Projects", self.sanitize(project_name), file)
+    
+    def is_project_file_path(self, text: str) -> bool:
+        """
+        Checks if a string is a relative file path starting with 'Projects/'
+        and ending with a file extension.
+        """
+        # 1. Quick and efficient check for the required starting directory
+        if not text.startswith("Projects/"):
+            return False
 
+        # 2. Use pathlib to robustly check for a file extension
+        p = Path(text)
+        # The '.suffix' attribute will be an empty string if there's no extension
+        return bool(p.suffix)
 
 WWSettingsManager = SettingsManager()
 

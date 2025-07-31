@@ -1,3 +1,4 @@
+import sys
 import json
 import os
 from PyQt5.QtWidgets import (
@@ -100,7 +101,7 @@ class EmbeddedPromptsPanel(QWidget):
         tokens_layout = QVBoxLayout()
         self.max_tokens_label = QLabel(_("Max Tokens:"))
         self.max_tokens_spin = QSpinBox()
-        self.max_tokens_spin.setRange(1, 32000)
+        self.max_tokens_spin.setRange(1, 2147483647)
         self.max_tokens_spin.setValue(2000)
         tokens_layout.addWidget(self.max_tokens_label)
         tokens_layout.addWidget(self.max_tokens_spin)
@@ -283,22 +284,18 @@ class EmbeddedPromptsPanel(QWidget):
                 self.replicate_button.show()
                 self.provider_combo.setEnabled(False)
                 self.model_combo.setEnabled(False)
-                self.max_tokens_spin.setEnabled(False)
                 self.temp_spin.setEnabled(False)
                 tooltip_msg = _("Default prompts are read-only. LLM settings cannot be modified.")
                 self.provider_combo.setToolTip(tooltip_msg)
                 self.model_combo.setToolTip(tooltip_msg)
-                self.max_tokens_spin.setToolTip(tooltip_msg)
                 self.temp_spin.setToolTip(tooltip_msg)
             else:
                 self.replicate_button.hide()
                 self.provider_combo.setEnabled(True)
                 self.model_combo.setEnabled(True)
-                self.max_tokens_spin.setEnabled(True)
                 self.temp_spin.setEnabled(True)
                 self.provider_combo.setToolTip("")
                 self.model_combo.setToolTip("")
-                self.max_tokens_spin.setToolTip("")
                 self.temp_spin.setToolTip("")
         else:
             self.editor.clear()
@@ -311,7 +308,7 @@ class EmbeddedPromptsPanel(QWidget):
         prompt_name = None
         if current_item:
             data = current_item.data(0, Qt.UserRole)
-            if data and data.get("type") == "prompt" and not data.get("default", False):
+            if data and data.get("type") == "prompt":
                 prompt_name = data.get("name")
                 new_text = self.editor.toPlainText()
                 data["text"] = new_text

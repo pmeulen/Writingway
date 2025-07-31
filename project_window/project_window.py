@@ -38,7 +38,6 @@ from .token_limit_dialog import TokenLimitDialog
 from gettext import pgettext
 import muse.prompt_handler as prompt_handler
 
-# Set the path to PyQt5 plugins
 import PyQt5
 pyqt_dir = os.path.dirname(PyQt5.__file__)
 possible_paths = [
@@ -63,7 +62,7 @@ class ProjectWindow(QMainWindow):
         self.unsaved_preview = False
         self.enhanced_window = compendium_window
         self.worker = None
-        self.last_sidebar_width = 250  # Default sidebar width
+        self.last_sidebar_width = 250
         self.init_ui()
         self.setup_connections()
         self.read_settings()
@@ -88,7 +87,6 @@ class ProjectWindow(QMainWindow):
         self.main_splitter = QSplitter(Qt.Horizontal)
         main_layout.addWidget(self.main_splitter)
 
-        # Left side: Activity Bar + Side Bar
         self.left_widget = QWidget()
         left_layout = QHBoxLayout(self.left_widget)
         left_layout.setContentsMargins(0, 0, 0, 0)
@@ -97,7 +95,6 @@ class ProjectWindow(QMainWindow):
         self.activity_bar = ActivityBar(self, self.icon_tint, position="left")
         left_layout.addWidget(self.activity_bar)
         self.scene_editor = SceneEditor(self, self.icon_tint)
-
 
         self.side_bar = QStackedWidget()
         self.side_bar.setMinimumWidth(200)
@@ -124,6 +121,7 @@ class ProjectWindow(QMainWindow):
         self.editor_stack.addWidget(self.prompts_editor)
         self.bottom_stack = BottomStack(self, self.model, self.icon_tint)
         self.bottom_stack.preview_text.textChanged.connect(self.on_preview_text_changed)
+        self.scene_editor.editor.textChanged.connect(self.on_editor_text_changed)
 
         right_vertical_splitter.addWidget(self.editor_stack)
         right_vertical_splitter.addWidget(self.bottom_stack)
@@ -138,7 +136,6 @@ class ProjectWindow(QMainWindow):
         self.setCentralWidget(main_widget)
 
     def update_sidebar_width(self, pos, index):
-        """Update last_sidebar_width when the splitter is moved."""
         if self.side_bar.isVisible():
             self.last_sidebar_width = self.main_splitter.sizes()[0]
 
@@ -226,9 +223,9 @@ class ProjectWindow(QMainWindow):
     def setup_connections(self):
         self.focus_mode_shortcut = QShortcut(QKeySequence("F11"), self)
         self.focus_mode_shortcut.activated.connect(self.open_focus_mode)
+        self.bottom_stack.summary_controller.progress_updated.connect(self.bottom_stack._update_progress)
 
     def load_scene_from_hierarchy(self, hierarchy):
-        """Load a scene into the editor based on its hierarchy."""
         if len(hierarchy) < 3:
             return
         item = self.project_tree.find_item_by_hierarchy(hierarchy)
@@ -255,14 +252,14 @@ class ProjectWindow(QMainWindow):
             self.start_autosave_timer()
         if self.project_tree.tree.topLevelItemCount() > 0:
             act_item = self.project_tree.tree.topLevelItem(0)
-            if act_item.childCount() > 0:
+            if act_item and act_item.childCount() > 0:
                 chapter_item = act_item.child(0)
                 if chapter_item.childCount() > 0:
                     self.project_tree.tree.setCurrentItem(chapter_item.child(0))
 
     def start_autosave_timer(self):
         self.autosave_timer = QTimer(self)
-        self.autosave_timer.setInterval(300000)  # 5 minutes
+        self.autosave_timer.setInterval(300000)
         self.autosave_timer.timeout.connect(self.autosave_scene)
         self.autosave_timer.start()
 
@@ -285,30 +282,36 @@ class ProjectWindow(QMainWindow):
         if hasattr(self, "main_splitter"):
             settings.setValue(f"{self.model.project_name}/mainSplitterState", self.main_splitter.saveState())
 
-    def closeEvent(self, event):
+    def closeEvent(self, a0):
         if not self.check_unsaved_changes():
-            event.ignore()
+            a0.ignore()
             return
         if hasattr(self, 'autosave_timer') and self.autosave_timer.isActive():
             self.autosave_timer.stop()
         self.write_settings()
-        event.accept()
+        a0.accept()
 
     def check_unsaved_changes(self, item=None):
         if self.model.unsaved_changes:
             self.autosave_scene(item)
         if self.unsaved_preview:
             self.autosave_preview()
+        current_item = item or self.project_tree.tree.currentItem()
+        if current_item and self.project_tree.get_item_level(current_item) < 2:
+            content = self.scene_editor.editor.toPlainText()
+            if content.strip():
+                hierarchy = self.get_item_hierarchy(current_item)
+                self.model.save_summary(hierarchy, content)
         return True
 
     @pyqtSlot(QTreeWidgetItem, QTreeWidgetItem)
     def tree_item_changed(self, current, previous):
+        if previous:
+            self.check_unsaved_changes(previous)
         if not current:
             self.scene_editor.editor.clear()
             self.bottom_stack.stack.setCurrentIndex(0)
             return
-        if previous:
-            self.check_unsaved_changes(previous)
         self.load_current_item_content()
         self.model.unsaved_changes = False
         self.unsaved_preview = False
@@ -320,20 +323,22 @@ class ProjectWindow(QMainWindow):
         level = self.project_tree.get_item_level(current)
         editor = self.scene_editor.editor
         hierarchy = self.get_item_hierarchy(current)
-        if level >= 2:  # Scene
+        if level >= 2:
             content = self.model.load_scene_content(hierarchy)
             if content and content.lstrip().startswith("<"):
                 editor.setHtml(content)
-            else:
+            elif content:
                 editor.setPlainText(content)
             editor.setPlaceholderText(_("Enter scene content..."))
             self.bottom_stack.stack.setCurrentIndex(1)
-        else:  # Summary
+        else:
             content = self.model.load_summary(hierarchy)
             if content and content.lstrip().startswith("<"):
                 editor.setHtml(content)
-            else:
+            elif content:
                 editor.setPlainText(content)
+            else:
+                editor.clear()
             editor.setPlaceholderText(_("Enter summary for {}...").format(current.text(0)))
             self.bottom_stack.stack.setCurrentIndex(0)
         self.update_setting_tooltips()
@@ -348,15 +353,13 @@ class ProjectWindow(QMainWindow):
         return hierarchy
     
     def get_current_scene_hierarchy(self):
-        """Return the hierarchy of the currently selected scene, or None if no scene is selected."""
         current_item = self.project_tree.tree.currentItem()
         if not current_item:
             return None
         level = self.project_tree.get_item_level(current_item)
-        if level < 2:  # Not a scene (Act or Chapter)
+        if level < 2:
             return None
         return self.get_item_hierarchy(current_item)
-
 
     def set_scene_status(self, item, new_status):
         english_status = ProjectTreeWidget.REVERSE_STATUS_MAP.get(new_status, new_status)
@@ -368,7 +371,7 @@ class ProjectWindow(QMainWindow):
 
     def manual_save_scene(self):
         current_item = self.project_tree.tree.currentItem()
-        if not current_item or self.project_tree.get_item_level(current_item) < 2:
+        if not current_item:
             QMessageBox.warning(self, _("Manual Save"), _("Please select a scene for manual save."))
             return
         content = self.scene_editor.editor.toHtml()
@@ -376,9 +379,15 @@ class ProjectWindow(QMainWindow):
             QMessageBox.warning(self, _("Manual Save"), _("There is no content to save."))
             return
         hierarchy = self.get_item_hierarchy(current_item)
-        filepath = self.model.save_scene(hierarchy, content)
+        
+        type_str = 'Scene'
+        if self.project_tree.get_item_level(current_item) < 2:
+            type_str = 'Summary'
+            filepath = self.model.save_summary_to_file(hierarchy, content)
+        else:
+            filepath = self.model.save_scene(hierarchy, content)
         if filepath:
-            self.update_save_status(_("Scene manually saved"))
+            self.update_save_status(_("{} manually saved").format(type_str))
             self.model.unsaved_changes = False
 
     def autosave_scene(self, current_item=None):
@@ -405,10 +414,19 @@ class ProjectWindow(QMainWindow):
 
     def on_oh_shit(self):
         current_item = self.project_tree.tree.currentItem()
-        if not current_item or self.project_tree.get_item_level(current_item) < 2:
-            QMessageBox.warning(self, _("Backup Versions"), _("Please select a scene to view backups."))
+        if not current_item:
+            QMessageBox.warning(self, _("Backup Versions"), _("Please select an item to view backups."))
             return
-        backup_file_path = show_backup_dialog(self, self.model.project_name, current_item.text(0))
+        level = self.project_tree.get_item_level(current_item)
+        hierarchy = self.get_item_hierarchy(current_item)
+        is_scene = level >= 2
+        backup_file_path = show_backup_dialog(
+            self,
+            self.model.project_name,
+            current_item.text(0),
+            hierarchy,
+            is_scene
+        )
         if backup_file_path:
             with open(backup_file_path, "r", encoding="utf-8") as f:
                 content = f.read()
@@ -417,6 +435,7 @@ class ProjectWindow(QMainWindow):
                 editor.setHtml(content)
             else:
                 editor.setPlainText(content)
+            self.model.unsaved_changes = True
             QMessageBox.information(self, _("Backup Loaded"), _("Backup loaded from:\n{}").format(backup_file_path))
 
     def handle_pov_change(self, index):
@@ -513,7 +532,6 @@ class ProjectWindow(QMainWindow):
         self.worker = LLMWorker(final_prompt, overrides)
         self.worker.data_received.connect(self.update_text)
         self.worker.finished.connect(self.on_finished)
-        self.worker.finished.connect(self.cleanup_worker)
         self.worker.token_limit_exceeded.connect(self.handle_token_limit_error)
         self.worker.start()
 
@@ -568,9 +586,10 @@ class ProjectWindow(QMainWindow):
     def retry_with_truncated_story(self):
         full_text = self.scene_editor.editor.toPlainText()
         prose_config = self.bottom_stack.prose_prompt_panel.get_prompt()
-        tokens = tiktoken.get_encoding("cl100k_base").encode(full_text)
+        encoding = tiktoken.get_encoding("cl100k_base")
+        tokens = encoding.encode(full_text)
         max_tokens = prose_config.get("max_tokens", 2000) * 0.5
-        truncated = self.encoding.decode(tokens[-int(max_tokens):])
+        truncated = encoding.decode(tokens[-int(max_tokens):])
         self.retry_with_summary(truncated)
 
     def update_text(self, text):
@@ -656,21 +675,6 @@ class ProjectWindow(QMainWindow):
         except Exception as e:
             QMessageBox.warning(self, _("Apply Preview"), _("Error: {}").format(str(e)))
 
-    def save_summary(self):
-        current_item = self.project_tree.tree.currentItem()
-        if not current_item:
-            QMessageBox.warning(self, _("Summary"), _("No Act or Chapter selected."))
-            return
-        summary_text = self.scene_editor.editor.toHtml()
-        hierarchy = self.get_item_hierarchy(current_item)
-        filepath = self.model.save_summary(hierarchy, summary_text)
-        if filepath:
-            self.update_save_status(_("Summary saved successfully"))
-            self.model.unsaved_changes = False
-            QMessageBox.information(self, _("Summary"), _("Summary saved successfully."))
-        else:
-            QMessageBox.critical(self, _("Summary"), _("Failed to save summary."))
-
     def toggle_bold(self):
         cursor = self.scene_editor.editor.textCursor()
         fmt = QTextCharFormat()
@@ -693,19 +697,10 @@ class ProjectWindow(QMainWindow):
         self.scene_editor.editor.mergeCurrentCharFormat(fmt)
 
     def toggle_color(self):
-        """
-        Open a color picker dialog and apply the chosen foreground/background
-        colors to the currently selected text in the editor.
-        """
-        # 1) Open QColorDialog via ColorManager:
         result = self.scene_editor.color_manager.choose_color(self.scene_editor)
         if not result:
             return
-
-        # 2) Unpack foreground and background
         fg, bg = result
-
-        # 3) Apply colors to the selected text
         self.scene_editor.color_manager.apply_color_to_selection(
             self.scene_editor.editor, fg, bg
         )
@@ -867,9 +862,16 @@ class ProjectWindow(QMainWindow):
         self.search_panel.update_tint(self.icon_tint)
         self.project_tree.assign_all_icons()
 
+    def refresh_category_backgrounds(self):
+        """Refresh category background colors when the setting changes."""
+        self.project_tree.assign_all_icons()
+
     def change_theme(self, new_theme):
         self.current_theme = new_theme
-        ThemeManager.apply_to_app(new_theme)
+        # Apply theme to this window only, don't emit global signal to avoid recursion
+        stylesheet = ThemeManager.get_stylesheet(new_theme)
+        self.setStyleSheet(stylesheet)
+        ThemeManager.clear_icon_cache()
         self.update_icons()
 
     def on_editor_text_changed(self):
@@ -910,7 +912,6 @@ class ProjectWindow(QMainWindow):
             print(f"Error saving prompt input: {e}")
 
     def clear_search_highlights(self):
-        """Clear search highlights when switching tools."""
         if hasattr(self, 'search_panel'):
             self.search_panel.clear_extra_selections()
 

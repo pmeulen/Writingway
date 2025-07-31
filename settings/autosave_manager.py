@@ -3,6 +3,7 @@ import os
 import time
 import glob
 import re
+from typing import Optional
 
 NEW_FILE_EXTENSION = ".html"  # Use HTML for new files
 
@@ -30,6 +31,15 @@ def get_project_folder(project_name: str) -> str:
         os.makedirs(project_folder)
     return project_folder
 
+def is_protected_backup(filepath: str) -> bool:
+    """Check if a backup file is marked as protected."""
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            content = f.read()
+            return "<!-- PROTECTED -->" in content.split("\n")[:2]  # Check first two lines
+    except Exception:
+        return False
+
 def get_latest_autosave_path(project_name: str, hierarchy: list) -> str | None:
     """
     Return the path to the most recent autosave file for a given scene.
@@ -45,7 +55,7 @@ def get_latest_autosave_path(project_name: str, hierarchy: list) -> str | None:
         return None
     return max(autosave_files, key=os.path.getmtime)
 
-def load_latest_autosave(project_name: str, hierarchy: list, node: dict = None) -> str | None:
+def load_latest_autosave(project_name: str, hierarchy: list, node: Optional[dict] = None) -> str | None:
     """
     Load the content of the most recent autosave file for a given scene.
 
@@ -75,9 +85,11 @@ def load_latest_autosave(project_name: str, hierarchy: list, node: dict = None) 
         try:
             with open(filepath, "r", encoding="utf-8") as f:
                 content = f.read()
-                if content.startswith("<!-- UUID:"):
-                    content = "\n".join(content.split("\n")[1:])
-                return content
+                # Strip UUID and PROTECTED comments
+                lines = content.split("\n")
+                while lines and (lines[0].startswith("<!-- UUID:") or lines[0] == "<!-- PROTECTED -->"):
+                    lines.pop(0)
+                return "\n".join(lines)
         except Exception as e:
             print(f"Error loading latest file {node['latest_file']}: {e}")
 
@@ -87,9 +99,11 @@ def load_latest_autosave(project_name: str, hierarchy: list, node: dict = None) 
         try:
             with open(latest_file, "r", encoding="utf-8") as f:
                 content = f.read()
-                if content.startswith("<!-- UUID:"):
-                    content = "\n".join(content.split("\n")[1:])
-                return content
+                # Strip UUID and PROTECTED comments
+                lines = content.split("\n")
+                while lines and (lines[0].startswith("<!-- UUID:") or lines[0] == "<!-- PROTECTED -->"):
+                    lines.pop(0)
+                return "\n".join(lines)
         except Exception as e:
             print(f"Error loading autosave file {latest_file}: {e}")
 
@@ -104,9 +118,11 @@ def load_latest_autosave(project_name: str, hierarchy: list, node: dict = None) 
                 try:
                     with open(filepath, "r", encoding="utf-8") as f:
                         content = f.read()
-                        if content.startswith("<!-- UUID:"):
-                            content = "\n".join(content.split("\n")[1:])
-                        return content
+                        # Strip UUID and PROTECTED comments
+                        lines = content.split("\n")
+                        while lines and (lines[0].startswith("<!-- UUID:") or lines[0] == "<!-- PROTECTED -->"):
+                            lines.pop(0)
+                        return "\n".join(lines)
                 except Exception as e:
                     print(f"Error loading autosave file {filepath}: {e}")
                 # Update node's latest_file if found
@@ -116,21 +132,26 @@ def load_latest_autosave(project_name: str, hierarchy: list, node: dict = None) 
 
 def cleanup_old_autosaves(project_folder: str, scene_identifier: str, max_files: int = 6) -> None:
     """
-    Remove the oldest autosave files if the number of autosaves exceeds max_files.
-    Searches for both .txt and .html files.
+    Remove the oldest unprotected autosave files if the number of unprotected autosaves exceeds max_files.
     """
     pattern_txt = os.path.join(project_folder, f"{scene_identifier}_*.txt")
     pattern_html = os.path.join(project_folder, f"{scene_identifier}_*{NEW_FILE_EXTENSION}")
     autosave_files = sorted(glob.glob(pattern_txt) + glob.glob(pattern_html), key=os.path.getmtime)
-    while len(autosave_files) > max_files:
-        oldest = autosave_files.pop(0)
+    
+    # Separate protected and unprotected files
+    unprotected_files = [f for f in autosave_files if not is_protected_backup(f)]
+    protected_files = [f for f in autosave_files if is_protected_backup(f)]
+    
+    # Remove oldest unprotected files if exceeding max_files
+    while len(unprotected_files) > max_files:
+        oldest = unprotected_files.pop(0)
         try:
             os.remove(oldest)
             print("Removed old autosave file:", oldest)
         except Exception as e:
             print("Error removing old autosave file:", e)
 
-def save_scene(project_name: str, hierarchy: list, uuid: str, content: str, expected_project_name: str = None) -> str:
+def save_scene(project_name: str, hierarchy: list, uuid: str, content: str, expected_project_name: Optional[str] = None) -> Optional[str]:
     """
     Save the scene content if it has changed since the last autosave.
     Uses the UUID and name for identification and file naming.
@@ -145,7 +166,6 @@ def save_scene(project_name: str, hierarchy: list, uuid: str, content: str, expe
     Returns:
         The filepath of the new autosave file if saved, or None if no changes were detected.
     """
-
     scene_identifier = build_scene_identifier(project_name, hierarchy)
 
     # Check if the scene content has changed.
@@ -165,8 +185,15 @@ def save_scene(project_name: str, hierarchy: list, uuid: str, content: str, expe
         print(error_msg)
         return None  # Prevent saving to the wrong project
 
-    # Embed UUID in the HTML content
-    content_with_uuid = f"<!-- UUID: {uuid} -->\n{content}"
+    # Check if the latest autosave was protected
+    latest_file = get_latest_autosave_path(project_name, hierarchy)
+    is_protected = is_protected_backup(latest_file) if latest_file else False
+    
+    # Embed UUID and protected status in the HTML content
+    content_with_uuid = f"<!-- UUID: {uuid} -->"
+    if is_protected:
+        content_with_uuid += "\n<!-- PROTECTED -->"
+    content_with_uuid += f"\n{content}"
 
     try:
         with open(filepath, "w", encoding="utf-8") as f:
@@ -178,4 +205,3 @@ def save_scene(project_name: str, hierarchy: list, uuid: str, content: str, expe
 
     cleanup_old_autosaves(project_folder, scene_identifier)
     return filepath
-

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QStackedWidget, QHBoxLayout, QPushButton, 
-                            QTextEdit, QComboBox, QCheckBox, QSizePolicy,
-                            QFormLayout, QSplitter)
+                            QTextEdit, QComboBox, QSizePolicy,
+                            QFormLayout, QSplitter, QCheckBox)
 from PyQt5.QtGui import QColor
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QVariant
 from settings.theme_manager import ThemeManager
 from .focus_mode import PlainTextEdit
 from compendium.context_panel import ContextPanel
-from .summary_controller import SummaryController
+from .summary_controller import SummaryController, SummaryMode
 from .summary_model import SummaryModel
 from muse.prompt_panel import PromptPanel
 from muse.prompt_preview_dialog import PromptPreviewDialog
@@ -20,14 +20,16 @@ class BottomStack(QWidget):
         self.model = model
         self.tint_color = tint_color
         self.stack = QStackedWidget()
-        self.scene_editor = controller.scene_editor  # Access editor via controller
+        self.scene_editor = controller.scene_editor
         self.summary_controller = SummaryController(
             SummaryModel(model.project_name),
             self,
             controller.project_tree
         )
-        self.summary_controller.status_updated.connect(self._update_status)
+        self.summary_controller.progress_updated.connect(self._update_progress)
         self.init_ui()
+        self.project_tree = controller.project_tree
+        self.project_tree.tree.currentItemChanged.connect(self._update_summary_mode_visibility)
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -43,7 +45,6 @@ class BottomStack(QWidget):
         panel = QWidget()
         layout = QHBoxLayout(panel)
 
-        # LLM Settings Group
         self.summary_prompt_panel = PromptPanel("Summary")
         self.summary_prompt_panel.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
         self.summary_prompt_panel.setMaximumWidth(300)
@@ -54,24 +55,55 @@ class BottomStack(QWidget):
         self.summary_preview_button.setToolTip(_("Preview the final prompt"))
         self.summary_preview_button.clicked.connect(self.summary_controller.preview_summary)
         layout.addWidget(self.summary_preview_button)
+        
+        layout.addStretch()
+        self.summary_mode_combo = QComboBox()
+        # Populate combo box with enum values and localized display names
+        for mode in SummaryMode:
+            self.summary_mode_combo.addItem(mode.display_name(), QVariant(mode))
+        self.summary_mode_combo.setToolTip(_("Select summary generation mode"))
+        self.summary_mode_combo.setVisible(False)  # Hidden by default
+        layout.addWidget(self.summary_mode_combo)
+
+        self.summary_start_button = QPushButton()
+        self.summary_start_button.setIcon(ThemeManager.get_tinted_icon("assets/icons/send.svg", self.tint_color))
+        self.summary_start_button.setToolTip(_("Start summary generation"))
+        self.summary_start_button.clicked.connect(self._start_summary)
+        layout.addWidget(self.summary_start_button)
+
+        self.delete_summary_button = QPushButton()
+        self.delete_summary_button.setIcon(ThemeManager.get_tinted_icon("assets/icons/trash.svg", self.tint_color))
+        self.delete_summary_button.setToolTip(_("Delete current summary"))
+        self.delete_summary_button.clicked.connect(self.summary_controller.delete_summary)
+        layout.addWidget(self.delete_summary_button)
 
         layout.addStretch()
-        self.create_summary_button = QPushButton(_("Create Summary"))
-        self.create_summary_button.clicked.connect(self.summary_controller.create_summary)
-        self.save_summary_button = QPushButton(_("Save Summary"))
-        self.save_summary_button.clicked.connect(self.controller.save_summary)
-        layout.addWidget(self.create_summary_button)
-        layout.addWidget(self.save_summary_button)
-        layout.addStretch()
-
         return panel
+
+    def _start_summary(self):
+        """Determine whether to create chapter or act summary based on selection."""
+        current_item = self.project_tree.tree.currentItem()
+        if not current_item:
+            return
+        level = self.project_tree.get_item_level(current_item)
+        if level == 0:
+            self.summary_controller.create_act_summary()
+        elif level == 1:
+            self.summary_controller.create_chapter_summary()
+
+    def _update_summary_mode_visibility(self, current, previous):
+        """Show/hide summary mode combo based on whether an Act is selected."""
+        if not current:
+            self.summary_mode_combo.setVisible(False)
+            return
+        level = self.project_tree.get_item_level(current)
+        self.summary_mode_combo.setVisible(level == 0)
 
     def create_llm_panel(self):
         panel = QWidget()
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # Preview Area
         self.preview_text = QTextEdit()
         self.preview_text.setReadOnly(True)
         self.preview_text.setPlaceholderText(_("LLM output preview will appear here..."))
@@ -87,7 +119,6 @@ class BottomStack(QWidget):
         preview_buttons.addWidget(self.include_prompt_checkbox)
         preview_buttons.addStretch()
 
-        # Action Beats Area
         action_layout = QHBoxLayout()
         action_layout.setContentsMargins(0, 0, 0, 0)
         left_container = QWidget()
@@ -100,8 +131,6 @@ class BottomStack(QWidget):
         left_layout.addWidget(self.prompt_input)
 
         buttons_layout = QHBoxLayout()
-
-        # LLM Settings Group
         self.prose_prompt_panel = PromptPanel("Prose")
         self.prose_prompt_panel.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
         self.prose_prompt_panel.setMaximumWidth(300)
@@ -132,12 +161,10 @@ class BottomStack(QWidget):
         self.context_toggle_button.clicked.connect(self.toggle_context_panel)
         buttons_layout.addWidget(self.context_toggle_button)
 
-        # POV, Character, Tense Pulldowns
-        buttons_layout.addStretch()  # Push combos to the right
+        buttons_layout.addStretch()
         pulldown_widget = QWidget()
         pulldown_layout = QFormLayout(pulldown_widget)
         pulldown_layout.setContentsMargins(0, 0, 20, 0)
-        # Tell combo boxes to expand to the same size
         pulldown_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
 
         self.pov_combo = self.add_combo(pulldown_layout, _("POV"), [_("First Person"), _("Third Person Limited"), _("Omniscient"), _("Custom...")], self.controller.handle_pov_change)
@@ -153,7 +180,6 @@ class BottomStack(QWidget):
         self.context_panel.setVisible(False)
         splitter.addWidget(self.context_panel)
         splitter.setSizes([500, 300])
-
 
         left_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         action_layout.addWidget(splitter)
@@ -171,14 +197,15 @@ class BottomStack(QWidget):
         return combo
     
     def update_tint(self, tint_color):
-        """Update icon tints when theme changes."""
         self.tint_color = tint_color
         self.apply_button.setIcon(ThemeManager.get_tinted_icon("assets/icons/save.svg", tint_color))
         self.send_button.setIcon(ThemeManager.get_tinted_icon("assets/icons/send.svg", tint_color))
         self.stop_button.setIcon(ThemeManager.get_tinted_icon("assets/icons/x-octagon.svg", tint_color))
         self.context_toggle_button.setIcon(ThemeManager.get_tinted_icon(
             "assets/icons/book-open.svg" if self.context_panel.isVisible() else "assets/icons/book.svg", tint_color))
-        # Update combo tooltips if needed
+        self.summary_preview_button.setIcon(ThemeManager.get_tinted_icon("assets/icons/eye.svg", tint_color))
+        self.summary_start_button.setIcon(ThemeManager.get_tinted_icon("assets/icons/play-circle.svg", tint_color))
+        self.delete_summary_button.setIcon(ThemeManager.get_tinted_icon("assets/icons/trash.svg", tint_color))
         if self.pov_combo:
             self.pov_combo.setToolTip(_("POV: {}").format(self.model.settings.get('global_pov', 'Third Person')))
         if self.pov_character_combo:
@@ -186,7 +213,7 @@ class BottomStack(QWidget):
         if self.tense_combo:
             self.tense_combo.setToolTip(_("Tense: {}").format(self.model.settings.get('global_tense', 'Present Tense')))
 
-    def _update_status(self, message):
+    def _update_progress(self, message):
         self.controller.statusBar().showMessage(message, 5000)
 
     def toggle_context_panel(self):
@@ -214,7 +241,6 @@ class BottomStack(QWidget):
         current_scene_text = self.scene_editor.editor.toPlainText().strip() if self.controller.project_tree.tree.currentItem() and self.controller.project_tree.get_item_level(self.controller.project_tree.tree.currentItem()) >= 2 else None
         extra_context = self.context_panel.get_selected_context_text()
         
-        # Show the preview dialog
         dialog = PromptPreviewDialog(
             self.controller,
             prompt_config=prompt_config, 

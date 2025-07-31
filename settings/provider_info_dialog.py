@@ -387,7 +387,8 @@ class ProviderInfoDialog(QDialog):
                 flattened = self.flatten_dict(model)
                 for col, key in enumerate(column_keys):
                     value = flattened.get(key, "")
-                    value = self.smart_string(value)
+                    if value:
+                        value = self.smart_string(value)
                     item = QTableWidgetItem(value)
                     if key == "id":
                         font = QFont()
