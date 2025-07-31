@@ -75,7 +75,7 @@ jobs:
       # Set --target-arch=universal2 for universal builds on OSX
       run: |
         pyinstaller \
-          --onefile \
+          --onedir \
           --name Writingway \
           --target-arch=arm64 \
           --hidden-import=tiktoken_ext.openai_public \
