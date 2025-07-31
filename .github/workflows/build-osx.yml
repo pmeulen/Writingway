@@ -83,7 +83,7 @@ jobs:
           --collect-all=pyaudio \
           --collect-all=cmudict \
           --add-data=assets:assets \
-          --splash=assets/logo.png
+          --splash=assets/logo.png \
           main.py
       working-directory: ./
 
