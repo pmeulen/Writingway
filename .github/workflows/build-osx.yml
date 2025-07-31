@@ -75,6 +75,8 @@ jobs:
       # Set --target-arch=universal2 for universal builds on OSX
       run: |
         pyinstaller \
+          --onefile \
+          --name Writingway \
           --target-arch=arm64 \
           --hidden-import=pyaudio \
           --collect-all=pyaudio \
