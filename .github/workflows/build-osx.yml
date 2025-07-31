@@ -79,6 +79,8 @@ jobs:
           --name Writingway \
           --target-arch=arm64 \
           --hidden-import=pyaudio \
+          --hidden-import=tiktoken_ext.openai_public \
+          --hidden-import=tiktoken_ext \
           --collect-all=pyaudio \
           main.py
       working-directory: ./
