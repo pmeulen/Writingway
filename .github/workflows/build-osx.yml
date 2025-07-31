@@ -13,9 +13,6 @@ jobs:
   build:
     runs-on: macos-latest
     
-    env:
-      MAIN_PY_FILE: 'main.py'  # path to main.py file
-
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -57,27 +54,37 @@ jobs:
         export ARCHFLAGS="-arch arm64"
 
         pip install -r requirements.txt
-      working-directory: ./    
+      working-directory: ./
 
+    - name: Install spaCy English model
+      run: |
+        python -m spacy download en_core_web_sm
+      working-directory: ./
+
+    - name: install beautifulsoup4
+      run: |
+        python -m pip install beautifulsoup4
+      working-directory: ./  
+  
     - name: Install PyInstaller
       run: |
         pip install pyinstaller
       working-directory: ./    
 
     - name: Build executable using pyinstaller
+      # Set --target-arch=universal2 for universal builds on OSX
       run: |
         pyinstaller \
-        # Disable universal2, defaults to system architecture (ARM)
-        # --target-arch=universal2 \
+          --target-arch=arm64 \
           --hidden-import=pyaudio \
           --collect-all=pyaudio \
-          ${{ env.MAIN_PY_FILE }}
+          main.py
       working-directory: ./
 
     - name: Create Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: macos-arm
+        name: macos-arm64
         path: dist/
 
     - name: List files in dist folder
