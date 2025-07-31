@@ -82,6 +82,8 @@ jobs:
           --hidden-import=tiktoken_ext \
           --collect-all=pyaudio \
           --collect-all=cmudict \
+          --add-data=assets:assets \
+          --splash=assets/logo.png
           main.py
       working-directory: ./
 
