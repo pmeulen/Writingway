@@ -1,7 +1,7 @@
 # Build executables using pyinstaller
 # Script based on https://github.com/NotCookey/Pyinstaller-Github-Actions
 
-name: Build Executables
+name: Build OSX ARM executable using pyinstaller
 
 on:
   workflow_dispatch:
