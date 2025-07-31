@@ -83,6 +83,7 @@ jobs:
           --hidden-import=tiktoken_ext \
           --hidden-import=cmudict \
           --collect-all=pyaudio \
+          --collect-all=cmudict \
           main.py
       working-directory: ./
 
