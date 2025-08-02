@@ -69,9 +69,8 @@ jobs:
       working-directory: ./    
 
     - name: Build executable using pyinstaller
-      # Set --target-arch=universal2 for universal builds on OSX
       run: |
-        pyinstaller pyinstaller/Writingway_osx.spec
+        TARGET_ARCH=arm64 pyinstaller pyinstaller/Writingway_osx.spec
       working-directory: ./
 
     - name: Create Artifact
