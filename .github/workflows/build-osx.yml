@@ -5,9 +5,6 @@ name: Build OSX ARM executable using pyinstaller
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 jobs:
   build:
@@ -74,16 +71,7 @@ jobs:
     - name: Build executable using pyinstaller
       # Set --target-arch=universal2 for universal builds on OSX
       run: |
-        pyinstaller \
-          --onedir \
-          --name Writingway \
-          --target-arch=arm64 \
-          --hidden-import=tiktoken_ext.openai_public \
-          --hidden-import=tiktoken_ext \
-          --collect-all=pyaudio \
-          --collect-all=cmudict \
-          --add-data=assets:assets \
-          main.py
+        pyinstaller pyinstaller/Writingway_osx.spec
       working-directory: ./
 
     - name: Create Artifact
