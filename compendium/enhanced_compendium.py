@@ -325,25 +325,34 @@ class EnhancedCompendiumWindow(QMainWindow):
             self.project_combo.blockSignals(False)
             return
         self.change_project(new_project)
-        self.select_first_entry()
 
     def select_first_entry(self):
-        """Select the first non-category entry in the tree."""
+        """Select the first entry if present, otherwise the first category."""
+        first_category = None
         for i in range(self.tree.topLevelItemCount()):
             cat_item = self.tree.topLevelItem(i)
+            if first_category is None and cat_item.data(0, Qt.UserRole) == "category":
+                first_category = cat_item
             if cat_item.childCount() > 0:
                 entry_item = cat_item.child(0)
                 if entry_item.data(0, Qt.UserRole) == "entry":
                     self.tree.setCurrentItem(entry_item)
                     return
 
-    def change_project(self, new_project):
+        if first_category is not None:
+            self.tree.setCurrentItem(first_category)
+        else:
+            self.clear_entry_ui()
+
+    def change_project(self, new_project, select_default_item=True):
         """Switch to a different project and reload its compendium data."""
         self.project_name = new_project
         self.manager = CompendiumManager(self.project_name, event_bus=self.event_bus)
         self.compendium_data = self.manager.load_data()
         self.setWindowTitle(_("Enhanced Compendium - {}").format(self.project_name))
         self.populate_compendium()
+        if select_default_item and self.tree.currentItem() is None:
+            self.select_first_entry()
 
     def create_tree_view(self):
         """Create the left panel: a tree view (with a search bar) for categories and entries."""
@@ -1042,13 +1051,15 @@ class EnhancedCompendiumWindow(QMainWindow):
             return
         if project_name != self.project_name:
             self.populate_project_combo(project_name)
-            self.change_project(project_name)
+            self.change_project(project_name, select_default_item=not entry_name)
 
         # Project switches can affect focus/state; enforce visibility again.
         self._ensure_window_visible()
 
         if entry_name:
             self.find_and_select_entry(entry_name)
+        elif self.tree.currentItem() is None:
+            self.select_first_entry()
 
     def find_and_select_entry(self, entry_name):
         """Search the tree and select an entry by name."""
