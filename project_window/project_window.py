@@ -55,6 +55,7 @@ from .rewrite_feature import RewriteDialog
 from .scene_editor import SceneEditor
 from .search_replace_panel import SearchReplacePanel
 from .token_limit_dialog import TokenLimitDialog
+import muse.prompt_handler as prompt_handler
 
 pyqt_dir = os.path.dirname(PyQt5.__file__)
 possible_paths = [
@@ -800,6 +801,20 @@ class ProjectWindow(QMainWindow):
 
     def open_compendium(self):
         self.toggle_compendium_view(not self.side_bar.isVisible() or self.side_bar.currentWidget() != self.compendium_panel)
+
+    def open_enhanced_compendium(self):
+        """Open the enhanced compendium for this project, or focus it if already visible."""
+        if not self.enhanced_window:
+            QMessageBox.warning(self, _("Compendium"), _("Enhanced Compendium is not available."))
+            return
+
+        if self.enhanced_window.isVisible():
+            self.enhanced_window._ensure_window_visible()
+            if self.enhanced_window.project_name != self.model.project_name:
+                self.enhanced_window.open_with_entry(self.model.project_name, None)
+            return
+
+        self.enhanced_window.open_with_entry(self.model.project_name, None)
 
     def repopulate_prompts(self):
         self.bottom_stack.prose_prompt_panel.repopulate_prompts()

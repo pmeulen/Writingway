@@ -67,6 +67,7 @@ class CompendiumPanel(QWidget):
         self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self.show_tree_context_menu)
         self.tree.currentItemChanged.connect(self.on_item_changed)
+        self.tree.itemDoubleClicked.connect(self.on_item_double_clicked)
         layout.addWidget(self.tree)
         self.populate_compendium()
 
@@ -146,6 +147,11 @@ class CompendiumPanel(QWidget):
             main_editor.setPlainText(content)
         else:
             main_editor.clear()
+
+    def on_item_double_clicked(self, item, column):
+        """Open the double-clicked entry in the Enhanced Compendium."""
+        if item and item.data(0, Qt.UserRole) == "entry":
+            self.open_in_enhanced_compendium()
 
     def show_tree_context_menu(self, pos: QPoint):
         menu = QMenu(self)
