@@ -28,6 +28,7 @@ class GlobalToolbar(QWidget):
 
         # Create actions and store references
         self.workshop_action = self.add_action("assets/icons/message-square.svg", _("Workshop Chat"), self.controller.open_workshop)
+        self.enhanced_compendium_action = self.add_action("assets/icons/book-open.svg", _("Open Enhanced Compendium"), self.controller.open_enhanced_compendium)
         self.whisper_action = self.add_action("assets/icons/mic.svg", _("Open Whisper"), self.controller.open_whisper_app)
         self.web_llm_action = self.add_action("assets/icons/wikidata.svg", _("Open Web with LLM"), self.controller.open_web_llm)
         self.ia_action = self.add_action("assets/icons/arch.svg", _("Open Internet Archive"), self.controller.open_ia_window)
@@ -44,6 +45,7 @@ class GlobalToolbar(QWidget):
         """Update icon tints when theme changes."""
         self.tint_color = tint_color
         self.workshop_action.setIcon(ThemeManager.get_tinted_icon("assets/icons/message-square.svg", tint_color))
+        self.enhanced_compendium_action.setIcon(ThemeManager.get_tinted_icon("assets/icons/book-open.svg", tint_color))
         self.whisper_action.setIcon(ThemeManager.get_tinted_icon("assets/icons/mic.svg", tint_color))
         self.web_llm_action.setIcon(ThemeManager.get_tinted_icon("assets/icons/wikidata.svg", tint_color))
         self.ia_action.setIcon(ThemeManager.get_tinted_icon("assets/icons/arch.svg", tint_color))
