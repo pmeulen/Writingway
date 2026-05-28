@@ -123,23 +123,46 @@ class CompendiumManager:
             data["categories"] = new_categories
             self._save_data(data)
 
-        # Ensure UUIDs for all entries
+        # Ensure UUIDs for all entries and keep extensions keyed by entry UUID.
         changed = False
+        ext_entries = data.get("extensions", {}).get("entries", {})
+        if not isinstance(ext_entries, dict):
+            ext_entries = {}
+            changed = True
+
+        migrated_extensions = {}
         for cat in data["categories"]:
             for entry in cat.get("entries", []):
                 if "uuid" not in entry:
                     entry["uuid"] = str(uuid4())
                     changed = True
-                # Ensure entry name exists in extensions
+                entry_uuid = entry.get("uuid")
                 entry_name = entry.get("name")
-                if entry_name and entry_name not in data["extensions"]["entries"]:
-                    data["extensions"]["entries"][entry_name] = {
+                extension_data = ext_entries.get(entry_uuid)
+                if extension_data is None and entry_name:
+                    extension_data = ext_entries.get(entry_name)
+                    if extension_data is not None:
+                        changed = True
+                if not isinstance(extension_data, dict):
+                    extension_data = {
                         "details": "",
                         "tags": [],
                         "relationships": [],
                         "images": []
                     }
                     changed = True
+
+                migrated_extensions[entry_uuid] = {
+                    "details": extension_data.get("details", ""),
+                    "tags": extension_data.get("tags", []),
+                    "relationships": extension_data.get("relationships", []),
+                    "images": extension_data.get("images", []),
+                }
+
+        if ext_entries != migrated_extensions:
+            changed = True
+        data["extensions"]["entries"] = migrated_extensions
+
         if changed:
             self._save_data(data)
 
@@ -247,14 +270,18 @@ class CompendiumManager:
             compendium_data["categories"].append(characters_cat)
 
         # Check if character already exists
+        entry_uuid = None
         for entry in characters_cat.get("entries", []):
             if entry.get("name") == name:
                 entry["content"] = description
+                if "uuid" not in entry:
+                    entry["uuid"] = str(uuid4())
+                entry_uuid = entry["uuid"]
                 break
         else:
             # Add new character entry
-            characters_cat["entries"].append({"name": name, "content": description})
-
+            entry_uuid = str(uuid4())
+            characters_cat["entries"].append({"name": name, "content": description, "uuid": entry_uuid})
         # Ensure extensions section exists
         if "extensions" not in compendium_data:
             compendium_data["extensions"] = {"entries": {}}
@@ -262,9 +289,10 @@ class CompendiumManager:
             compendium_data["extensions"]["entries"] = {}
 
         # Add minimal extended data
-        if name not in compendium_data["extensions"]["entries"]:
-            compendium_data["extensions"]["entries"][name] = {"details": "", "tags": [], "relationships": [], "images": []}
-
+        if entry_uuid and entry_uuid not in compendium_data["extensions"]["entries"]:
+            compendium_data["extensions"]["entries"][entry_uuid] = {
+                "details": "", "tags": [], "relationships": [], "images": []
+            }
         self._save_data(compendium_data)
 
     def upsert_data(self, compendium_data: dict[str, Any]) -> None:

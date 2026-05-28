@@ -274,8 +274,8 @@ Return only the JSON result without additional commentary. The JSON should maint
                 for entry in cat.get("entries", []):
                     entry_name = entry.get("name")
                     if entry_name:
-                        entry.setdefault("uuid", str(uuid.uuid4()))
-                        ai_compendium["extensions"]["entries"][entry_name] = {
+                        entry_uuid = entry.setdefault("uuid", str(uuid.uuid4()))
+                        ai_compendium["extensions"]["entries"][entry_uuid] = {
                             "relationships": entry.get("relationships", []),
                             "details": "",
                             "tags": [],
