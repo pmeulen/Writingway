@@ -257,9 +257,6 @@ class EnhancedCompendiumWindow(QMainWindow):
          spacer = QWidget()
          spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
          toolbar.addWidget(spacer)
-         self.entry_name_label = QLabel(_("No entry selected"))
-         self.entry_name_label.setStyleSheet("font-size: 12pt; font-weight: bold;")
-         toolbar.addWidget(self.entry_name_label)
          return toolbar
 
     def populate_project_combo(self, project_name=None):
@@ -427,6 +424,7 @@ class EnhancedCompendiumWindow(QMainWindow):
         self.tabs.addTab(self.image_widget, _("Images"))
 
         center_layout.addWidget(self.tabs)
+        center_layout.addStretch()
         self.main_splitter.addWidget(self.center_widget)
 
     def create_right_panel(self):
@@ -438,6 +436,7 @@ class EnhancedCompendiumWindow(QMainWindow):
         self.tag_input = QLineEdit()
         self.tag_color_button = QPushButton(_("Choose Color"))
         self.add_tag_button = QPushButton(_("Add Tag"))
+        self.add_tag_button.setEnabled(False)
         form_layout.addRow(_("Tag:"), self.tag_input)
         form_layout.addRow(self.tag_color_button)
         form_layout.addRow(self.add_tag_button)
@@ -970,6 +969,7 @@ class EnhancedCompendiumWindow(QMainWindow):
         # No entry selected (or category selected): hide entry-specific action buttons.
         self.save_button.hide()
         self.revert_button.hide()
+        self.add_tag_button.setEnabled(False)
         self.editor.clear()
         self.details_editor.clear()
         self.tags_list.clear()
