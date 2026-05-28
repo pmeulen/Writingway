@@ -1,4 +1,12 @@
 import re
+from PyQt5.QtWidgets import (QMainWindow, QWidget, QToolBar, QSplitter, QTreeWidget, QTextEdit, QVBoxLayout, QHBoxLayout, QLabel, 
+                             QLineEdit, QComboBox, QPushButton, QListWidget, QTabWidget, QFileDialog, QMessageBox, QTreeWidgetItem,
+                             QScrollArea, QFormLayout, QGroupBox, QInputDialog, QMenu, QColorDialog, QSizePolicy, QListWidgetItem,
+                             QFrame)
+from PyQt5.QtCore import Qt, QSettings
+from PyQt5.QtGui import QPixmap, QColor, QBrush, QFont
+from compendium.compendium_manager import CompendiumManager, CompendiumEventBus
+from settings.theme_manager import ThemeManager
 import uuid
 from gettext import gettext as _
 
@@ -212,6 +220,12 @@ class EnhancedCompendiumWindow(QMainWindow):
                 self.tabs.setTabText(tab_index, f"● {base_name}")
             else:
                 self.tabs.setTabText(tab_index, base_name)
+        # Update the Tags label with dirty indicator
+        tags_base_name = _("Tags")
+        if self.dirty_fields.get("tags", False):
+            self.tags_form.setTitle(f"● {tags_base_name}")
+        else:
+            self.tags_form.setTitle(tags_base_name)
 
     def _discard_current_entry_changes(self, reload_entry=True):
         """Discard unsaved changes for the current entry and optionally reload saved values into the UI."""
@@ -434,11 +448,23 @@ class EnhancedCompendiumWindow(QMainWindow):
         self.tags_form = QGroupBox(_("Tags"))
         form_layout = QFormLayout()
         self.tag_input = QLineEdit()
-        self.tag_color_button = QPushButton(_("Choose Color"))
+        # Color selector row: color preview box on the left, button on the right
+        color_row = QHBoxLayout()
+        self.tag_color_preview = QFrame()
+        self.tag_color_preview.setFixedSize(24, 24)
+        self.tag_color_preview.setFrameShape(QFrame.Box)
+        self.tag_color_preview.setStyleSheet("background-color: #000000;")
+        self._current_tag_color = "#000000"
+        color_row.addWidget(self.tag_color_preview)
+        color_row.addStretch()
+        self.tag_color_button = QPushButton(_("Set..."))
+        color_row.addWidget(self.tag_color_button)
+        color_row_widget = QWidget()
+        color_row_widget.setLayout(color_row)
         self.add_tag_button = QPushButton(_("Add Tag"))
         self.add_tag_button.setEnabled(False)
         form_layout.addRow(_("Tag:"), self.tag_input)
-        form_layout.addRow(self.tag_color_button)
+        form_layout.addRow(_("Color:"), color_row_widget)
         form_layout.addRow(self.add_tag_button)
         self.tags_form.setLayout(form_layout)
         self.tags_list = QListWidget()
@@ -456,6 +482,7 @@ class EnhancedCompendiumWindow(QMainWindow):
         self.revert_button.clicked.connect(self.revert_current_entry)
         self.add_tag_button.clicked.connect(self.add_tag)
         self.tag_color_button.clicked.connect(self.choose_tag_color)
+        self.tag_input.textChanged.connect(self.update_add_tag_button_state)
         self.tags_list.customContextMenuRequested.connect(self.show_tags_context_menu)
         self.add_relationship_button.clicked.connect(self.add_relationship)
         self.relationships_list.customContextMenuRequested.connect(self.show_relationships_context_menu)
@@ -919,7 +946,7 @@ class EnhancedCompendiumWindow(QMainWindow):
         # Entry selected: show entry-specific actions; enabled state is handled by dirty tracking.
         self.save_button.show()
         self.revert_button.show()
-        self.add_tag_button.setEnabled(True)
+        self.update_add_tag_button_state()
         # Block signals while loading to avoid spuriously marking dirty.
         self.editor.blockSignals(True)
         content = entry_item.data(1, Qt.UserRole)
@@ -1048,7 +1075,7 @@ class EnhancedCompendiumWindow(QMainWindow):
         """Add a new tag to the current entry."""
         tag_name = self.tag_input.text().strip()
         if tag_name and hasattr(self, 'current_entry'):
-            tag_color = self.tag_color_button.property("current_color") or "#000000"
+            tag_color = self._current_tag_color
             item = QListWidgetItem(tag_name)
             item.setData(Qt.UserRole, tag_color)
             item.setForeground(QBrush(QColor(tag_color)))
@@ -1057,13 +1084,21 @@ class EnhancedCompendiumWindow(QMainWindow):
             self.tag_input.clear()
             self.mark_dirty("tags")
 
+    def update_add_tag_button_state(self):
+        """Enable the add tag button only when there is text in the tag input field."""
+        has_text = bool(self.tag_input.text().strip())
+        has_entry = hasattr(self, 'current_entry')
+        self.add_tag_button.setEnabled(has_text and has_entry)
+
     def choose_tag_color(self):
         """Open a color dialog to choose a tag color."""
-        color = QColorDialog.getColor()
+        color = QColorDialog.getColor(QColor(self._current_tag_color), self)
         if color.isValid():
-            self.tag_color_button.setProperty("current_color", color.name())
-            self.tag_color_button.setStyleSheet(f"background-color: {color.name()};")
+            self._current_tag_color = color.name()
+            self.tag_color_preview.setStyleSheet(f"background-color: {color.name()};")
             self.mark_dirty("tags")
+        self.raise_()
+        self.activateWindow()
 
     def show_tags_context_menu(self, pos):
         """Show context menu for tags list."""
