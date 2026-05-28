@@ -14,8 +14,10 @@ from settings.llm_api_aggregator import WWApiAggregator
 from settings.llm_settings_dialog import LLMSettingsDialog
 from settings.settings_manager import WWSettingsManager
 from settings.theme_manager import ThemeManager
-
+from settings.llm_settings_dialog import LLMSettingsDialog
+from compendium.compendium_manager import CompendiumManager, CompendiumEventBus
 from .ai_compendium_dialog import AICompendiumDialog
+
 
 DEBUG = False
 
@@ -280,5 +282,5 @@ Return only the JSON result without additional commentary. The JSON should maint
             QMessageBox.warning(self, _("Error"), _("Failed to save compendium: {}").format(str(e)))
 
     def update_compendium_tree(self, project_name):
-        if project_name == self.project_name and self.isVisible():
+        if project_name == self.project_name:
             self.populate_compendium()

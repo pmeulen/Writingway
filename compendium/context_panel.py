@@ -412,5 +412,5 @@ class ContextPanel(QWidget):
 
     def update_compendium_tree(self, project_name):
         """Update the compendium tree if the project name matches."""
-        if project_name == self.project_name and self.isVisible():
+        if project_name == self.project_name:
             self.build_compendium_tree()

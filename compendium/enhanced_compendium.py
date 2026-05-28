@@ -37,11 +37,31 @@ from settings.theme_manager import ThemeManager
 
 DEBUG = False
 
+
+# ---------------------------------------------------------------------------
+# Data model
+# ---------------------------------------------------------------------------
+# Compendium data is stored in <project>/compendium.json with two sections:
+#
+#   "categories": [ { "name": str, "entries": [ { "name", "content", "uuid" } ] } ]
+#       The canonical entry list.  Every part of the app (project compendium
+#       panel, POV selector, AI context, etc.) reads from here.
+#
+#   "extensions": { "entries": { <name>: { "details", "tags",
+#                                          "relationships", "images" } } }
+#       Extra per-entry data used only by the Enhanced Compendium (private
+#       notes, tags, relationships, images).  Keyed by entry name.
+#
+# Rule: an entry MUST exist in categories[].entries[] to be visible to the
+# rest of the app.  The extensions record is supplementary.
+# ---------------------------------------------------------------------------
+
 class EnhancedCompendiumWindow(QMainWindow):
     """
     Enhanced Compendium Window - A comprehensive interface for managing compendium data
     with categories, entries, tags, relationships, details, and images.
     """
+
     def __init__(self, parent=None):
         """
         Initialize the Enhanced Compendium Window.
@@ -51,9 +71,22 @@ class EnhancedCompendiumWindow(QMainWindow):
             parent: Parent widget
         """
         super().__init__(parent)
-        self.dirty = False  # Track unsaved changes
-        self.project_name = "default" # project_name is set when we become visible
+        # Per-field dirty tracking.  "tags" lives in the right panel (no tab), so it
+        # contributes to the overall dirty state but has no tab indicator.
+        self.dirty_fields = {"overview": False, "details": False, "relationships": False, "images": False, "tags": False}
+        # Tab indices and base names (must stay in sync with addTab() calls below).
+        self._tab_base_names = [_("Overview"), _("Details"), _("Relationships"), _("Images")]
+        self._field_tab_map = {"overview": 0, "details": 1, "relationships": 2, "images": 3}
+        # Guard used to avoid nested Save/Discard prompts caused by tree selection
+        # changes during programmatic save/refresh flows.
+        self._suppress_unsaved_prompt = False
+        # Pending image paths for the currently loaded entry. This mirrors the UI
+        # state and is written to compendium_data only on explicit Save.
+        self._current_images = []
+        self.project_name = "default"  # project_name is set when we become visible
         self.controller = parent
+        # Shared event bus: notifies all listeners (this window, project panel, POV selector, …) whenever
+        # the compendium file is written.
         self.event_bus = CompendiumEventBus.get_instance()
         self.manager = CompendiumManager(self.project_name, event_bus=self.event_bus)
         self.event_bus.add_updated_listener(self.on_compendium_updated)
@@ -118,27 +151,116 @@ class EnhancedCompendiumWindow(QMainWindow):
 
     def closeEvent(self, event):
         """Handle window close event to save settings and any unsaved changes."""
-        if self.dirty and hasattr(self, 'current_entry') and hasattr(self, 'current_entry_item'):
-            self.save_current_entry()
+        if not self.maybe_commit_unsaved_changes():
+            event.ignore()
+            return
         self.write_settings()
         event.accept()
 
-    def mark_dirty(self):
-        """Mark the current entry as having unsaved changes."""
-        self.dirty = True
+    def maybe_commit_unsaved_changes(self):
+        """Prompt to save/discard unsaved edits; returns False when user cancels."""
+        if not (self.is_dirty() and hasattr(self, 'current_entry') and hasattr(self, 'current_entry_item')):
+            return True
+
+        entry_name = getattr(self, 'current_entry', _('this entry'))
+        choice = QMessageBox.question(
+            self,
+            _("Unsaved Changes"),
+            _("You have unsaved changes for '{}'. Save before continuing?").format(entry_name),
+            QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+            QMessageBox.Save,
+        )
+        if choice == QMessageBox.Save:
+            self._suppress_unsaved_prompt = True
+            try:
+                return self.save_current_entry()
+            finally:
+                self._suppress_unsaved_prompt = False
+        if choice == QMessageBox.Discard:
+            self._suppress_unsaved_prompt = True
+            try:
+                self._discard_current_entry_changes(reload_entry=True)
+                return True
+            finally:
+                self._suppress_unsaved_prompt = False
+        return False
+
+    def mark_dirty(self, field="overview"):
+        """Mark a specific field of the current entry as having unsaved changes."""
+        if field in self.dirty_fields:
+            self.dirty_fields[field] = True
+        self._update_dirty_ui()
+
+    def is_dirty(self):
+        """Return True if any field of the current entry has unsaved changes."""
+        return any(self.dirty_fields.values())
+
+    def _reset_dirty(self):
+        """Reset all dirty flags and refresh the UI indicators."""
+        for key in self.dirty_fields:
+            self.dirty_fields[key] = False
+        self._update_dirty_ui()
+
+    def _update_dirty_ui(self):
+        """Update tab labels and Save/Revert button states to reflect dirty state."""
+        dirty = self.is_dirty()
+        self.save_button.setEnabled(dirty)
+        self.revert_button.setEnabled(dirty)
+        for field, tab_index in self._field_tab_map.items():
+            base_name = self._tab_base_names[tab_index]
+            if self.dirty_fields.get(field, False):
+                self.tabs.setTabText(tab_index, f"● {base_name}")
+            else:
+                self.tabs.setTabText(tab_index, base_name)
+
+    def _discard_current_entry_changes(self, reload_entry=True):
+        """Discard unsaved changes for the current entry and optionally reload saved values into the UI."""
+        if not hasattr(self, 'current_entry') or not hasattr(self, 'current_entry_item'):
+            self._reset_dirty()
+            return
+        current_entry_name = self.current_entry
+        self._reset_dirty()
+        # Reload authoritative state from disk so discarded changes do not linger
+        # in memory when the window is reopened.
+        self.compendium_data = self.manager.load_data()
+        self.populate_compendium()
+        if reload_entry:
+            self.find_and_select_entry(current_entry_name)
+            current_item = self.tree.currentItem()
+            if current_item is not None and current_item.data(0, Qt.UserRole) == "entry":
+                self.load_entry(current_item.text(0), current_item)
+            else:
+                self.clear_entry_ui()
+
+    def revert_current_entry(self):
+        """Revert the current entry to its last saved state (from compendium_data)."""
+        if not self.is_dirty() or not hasattr(self, 'current_entry') or not hasattr(self, 'current_entry_item'):
+            return
+        confirm = QMessageBox.question(
+            self,
+            _("Revert Changes"),
+            _("Discard all unsaved changes to '{}'?").format(self.current_entry),
+            QMessageBox.Discard | QMessageBox.Cancel,
+            QMessageBox.Cancel,
+        )
+        if confirm == QMessageBox.Discard:
+            self._discard_current_entry_changes(reload_entry=True)
 
     def create_toolbar(self):
-        """Create the project selection toolbar at the top of the window."""
-        toolbar = QToolBar(_("Project Toolbar"), self)
-        toolbar.setObjectName("EnhToolBar_Main")
-        label = QLabel(_("<b>Project:</b>"))
-        toolbar.addWidget(label)
-        self.project_combo = QComboBox()
-        toolbar.addWidget(self.project_combo)
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        toolbar.addWidget(spacer)
-        return toolbar
+         """Create the project selection toolbar at the top of the window."""
+         toolbar = QToolBar(_("Project Toolbar"), self)
+         toolbar.setObjectName("EnhToolBar_Main")
+         label = QLabel(_("<b>Project:</b>"))
+         toolbar.addWidget(label)
+         self.project_combo = QComboBox()
+         toolbar.addWidget(self.project_combo)
+         spacer = QWidget()
+         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+         toolbar.addWidget(spacer)
+         self.entry_name_label = QLabel(_("No entry selected"))
+         self.entry_name_label.setStyleSheet("font-size: 12pt; font-weight: bold;")
+         toolbar.addWidget(self.entry_name_label)
+         return toolbar
 
     def populate_project_combo(self, project_name=None):
         """
@@ -160,6 +282,7 @@ class EnhancedCompendiumWindow(QMainWindow):
         if projects:
             projects.sort()
             self.project_combo.addItems(projects)
+            # Match by sanitized name (strips non-word chars to match folder names)
             index = self.project_combo.findText(self.sanitize(project_name))
             if index < 0:
                 self.project_combo.setCurrentIndex(0)
@@ -172,11 +295,24 @@ class EnhancedCompendiumWindow(QMainWindow):
             self.project_name = "default"
 
         self.project_combo.blockSignals(False)
+        try:
+            self.project_combo.currentTextChanged.disconnect(self.on_project_combo_changed)
+        except TypeError:
+            pass
         self.project_combo.currentTextChanged.connect(self.on_project_combo_changed)
         self.setWindowTitle(_("Enhanced Compendium - {}").format(self.project_name))
 
     def on_project_combo_changed(self, new_project):
         """Update the project and reload the compendium when a different project is selected."""
+        if new_project == self.project_name:
+            return
+        if not self.maybe_commit_unsaved_changes():
+            self.project_combo.blockSignals(True)
+            previous_index = self.project_combo.findText(self.project_name)
+            if previous_index >= 0:
+                self.project_combo.setCurrentIndex(previous_index)
+            self.project_combo.blockSignals(False)
+            return
         self.change_project(new_project)
         self.select_first_entry()
 
@@ -213,7 +349,7 @@ class EnhancedCompendiumWindow(QMainWindow):
 
     def create_center_panel(self):
         """
-        Create the center panel with a header and a tabbed view for content, details, 
+        Create the center panel with a header and a tabbed view for content, details,
         relationships, and images.
         """
         self.center_widget = QWidget()
@@ -226,13 +362,20 @@ class EnhancedCompendiumWindow(QMainWindow):
         self.entry_name_label.setStyleSheet("font-size: 16pt; font-weight: bold;")
         header_layout.addWidget(self.entry_name_label)
         header_layout.addStretch()
+        self.revert_button = QPushButton(_("Revert"))
+        self.revert_button.setToolTip(_("Discard all unsaved changes to this entry"))
+        self.revert_button.setEnabled(False)
+        self.revert_button.hide()
+        header_layout.addWidget(self.revert_button)
         self.save_button = QPushButton(_("Save Changes"))
+        self.save_button.setEnabled(False)
+        self.save_button.hide()
         header_layout.addWidget(self.save_button)
         center_layout.addWidget(self.header_widget)
 
         self.tabs = QTabWidget()
 
-        # Overview tab - content visible to AI
+        # Overview tab - "content" field;
         self.overview_tab = QWidget()
         overview_layout = QVBoxLayout(self.overview_tab)
         self.editor = QTextEdit()
@@ -241,13 +384,13 @@ class EnhancedCompendiumWindow(QMainWindow):
         self.tabs.addTab(self.overview_tab, _("Overview"))
         self.tabs.setTabToolTip(0, _("this is the text the AI can see if you select this entry to be included in the prompt inside the context panel"))
 
-        # Details tab - private notes not visible to AI
+        # Details tab - stored in extensions only; never sent to the AI.
         self.details_editor = QTextEdit()
         self.details_editor.setPlaceholderText(_("Enter details about your entry here... (details about your entry the AI can't see - this info is only for you)"))
         self.tabs.addTab(self.details_editor, _("Details"))
         self.tabs.setTabToolTip(1, _("details about your entry the AI can't see - this info is only for you"))
 
-        # Relationships tab
+        # Relationships tab - stored in extensions only.
         self.relationships_tab = QWidget()
         relationships_layout = QVBoxLayout(self.relationships_tab)
         self.relationships_form = QGroupBox(_("Relationships"))
@@ -265,7 +408,7 @@ class EnhancedCompendiumWindow(QMainWindow):
         relationships_layout.addWidget(self.relationships_list)
         self.tabs.addTab(self.relationships_tab, _("Relationships"))
 
-        # Images tab
+        # Images tab - stored in extensions only.
         self.images_tab = QTabWidget()
         self.image_scroll = QScrollArea()
         self.image_scroll.setWidgetResizable(True)
@@ -309,14 +452,15 @@ class EnhancedCompendiumWindow(QMainWindow):
         self.tree.currentItemChanged.connect(self.on_item_changed)
         self.search_bar.textChanged.connect(self.filter_tree)
         self.save_button.clicked.connect(self.save_current_entry)
+        self.revert_button.clicked.connect(self.revert_current_entry)
         self.add_tag_button.clicked.connect(self.add_tag)
         self.tag_color_button.clicked.connect(self.choose_tag_color)
         self.tags_list.customContextMenuRequested.connect(self.show_tags_context_menu)
         self.add_relationship_button.clicked.connect(self.add_relationship)
         self.relationships_list.customContextMenuRequested.connect(self.show_relationships_context_menu)
         self.add_image_button.clicked.connect(self.add_image)
-        self.editor.textChanged.connect(self.mark_dirty)
-        self.details_editor.textChanged.connect(self.mark_dirty)
+        self.editor.textChanged.connect(lambda: self.mark_dirty("overview"))
+        self.details_editor.textChanged.connect(lambda: self.mark_dirty("details"))
 
     def sanitize(self, text):
         """Sanitize text by removing non-word characters for safe filenames."""
@@ -328,6 +472,7 @@ class EnhancedCompendiumWindow(QMainWindow):
         self.tree.clear()
         bold_font = QFont()
         bold_font.setBold(True)
+        # Always reload from disk so the tree reflects the authoritative file state.
         self.compendium_data = self.manager.load_data()
         for cat in self.compendium_data.get("categories", []):
             cat_name = cat.get("name", "Unnamed Category")
@@ -335,6 +480,7 @@ class EnhancedCompendiumWindow(QMainWindow):
             cat_item.setData(0, Qt.UserRole, "category")
             cat_item.setBackground(0, QBrush(ThemeManager.get_category_background_color()))
             cat_item.setFont(0, bold_font)
+            # Entries are sourced from categories[].entries[] — the canonical list.
             for entry in sorted(cat.get("entries", []), key=lambda e: e.get("name", "")):
                 entry_name = entry.get("name", "Unnamed Entry")
                 entry_item = QTreeWidgetItem(cat_item, [entry_name])
@@ -412,18 +558,31 @@ class EnhancedCompendiumWindow(QMainWindow):
     def save_current_entry(self):
         """Save the current entry's data to the compendium."""
         if hasattr(self, 'current_entry') and hasattr(self, 'current_entry_item'):
-            self.save_entry(self.current_entry_item)
-            self.dirty = False
+            self._suppress_unsaved_prompt = True
+            try:
+                save_ok = self.save_entry(self.current_entry_item)
+                if save_ok:
+                    self._reset_dirty()
+                return save_ok
+            finally:
+                self._suppress_unsaved_prompt = False
+        return True
 
     def save_entry(self, entry_item):
-        """Save the entry data to compendium_data and persist to file."""
+        """
+        Persist the currently displayed entry back to self.compendium_data and then to disk.
+        Updates both the canonical categories[].entries[] record (content, uuid) and the
+        extensions record (details, tags, relationships, images).
+        """
         entry_name = entry_item.text(0)
         category_item = entry_item.parent()
         if not category_item:
-            return
+            return False
         category_name = category_item.text(0)
         content = self.editor.toPlainText()
+        # Keep the tree item's cached content in sync.
         entry_item.setData(1, Qt.UserRole, content)
+        # Update the canonical entry in categories[].entries[].
         for cat in self.compendium_data["categories"]:
             if cat.get("name") == category_name:
                 for entry in cat.get("entries", []):
@@ -432,6 +591,7 @@ class EnhancedCompendiumWindow(QMainWindow):
                         entry["uuid"] = entry_item.data(2, Qt.UserRole)
                         break
                 else:
+                    # Entry not yet in the list — add it (safety fallback).
                     new_entry = {
                         "name": entry_name,
                         "content": content,
@@ -439,6 +599,7 @@ class EnhancedCompendiumWindow(QMainWindow):
                     }
                     cat["entries"].append(new_entry)
                 break
+        # Update the extensions record with enhanced-only fields.
         if entry_name in self.compendium_data["extensions"]["entries"]:
             extended_data = self.compendium_data["extensions"]["entries"][entry_name]
             extended_data["details"] = self.details_editor.toPlainText()
@@ -451,7 +612,8 @@ class EnhancedCompendiumWindow(QMainWindow):
                 for i in range(self.relationships_list.topLevelItemCount())
             ]
             extended_data["images"] = self.get_images()
-        self.save_compendium_to_file()
+
+        return self.save_compendium_to_file()
 
     def save_compendium_to_file(self):
         """Save the compendium data back to the file via the manager."""
@@ -459,10 +621,12 @@ class EnhancedCompendiumWindow(QMainWindow):
             self.manager.save_data(self.compendium_data)
             if DEBUG:
                 print("Saved compendium data to", self.compendium_file)
+            return True
         except Exception as e:
             if DEBUG:
                 print("Error saving compendium data:", e)
             QMessageBox.warning(self, _("Error"), _("Failed to save compendium data: {}").format(str(e)))
+            return False
 
     def new_category(self):
         """Create a new category in the compendium."""
@@ -472,6 +636,7 @@ class EnhancedCompendiumWindow(QMainWindow):
             cat_item.setData(0, Qt.UserRole, "category")
             cat_item.setBackground(0, QBrush(ThemeManager.get_category_background_color()))
             cat_item.setFont(0, QFont("", weight=QFont.Bold))
+            # Add to the canonical categories list and persist.
             self.compendium_data["categories"].append({"name": name, "entries": []})
             self.save_compendium_to_file()
 
@@ -482,8 +647,23 @@ class EnhancedCompendiumWindow(QMainWindow):
             entry_item = QTreeWidgetItem(category_item, [name])
             entry_item.setData(0, Qt.UserRole, "entry")
             entry_item.setData(1, Qt.UserRole, "")
-            entry_item.setData(2, Qt.UserRole, str(uuid.uuid4()))
-            self.compendium_data["extensions"]["entries"][name] = {"details": "", "tags": [], "relationships": [], "images": []}
+            new_uuid = str(uuid.uuid4())
+            entry_item.setData(2, Qt.UserRole, new_uuid)
+
+            # Add to the canonical categories[].entries[] list so the entry is visible to the rest of the
+            # app (project compendium panel, POV selector, AI context).
+            # Without this the entry only exists in the extensions dict and disappears on the next
+            # populate_compendium().
+            for cat in self.compendium_data["categories"]:
+                if cat.get("name") == category_item.text(0):
+                    cat["entries"].append({"name": name, "content": "", "uuid": new_uuid})
+                    break
+
+            # Add the extensions record for enhanced-only fields.
+            self.compendium_data["extensions"]["entries"][name] = {
+                "details": "", "tags": [], "relationships": [], "images": []
+            }
+
             category_item.setExpanded(True)
             self.tree.setCurrentItem(entry_item)
             self.save_compendium_to_file()
@@ -495,6 +675,7 @@ class EnhancedCompendiumWindow(QMainWindow):
             _("Are you sure you want to delete the category '{}' and all its entries?").format(category_item.text(0)),
             QMessageBox.Yes | QMessageBox.No)
         if confirm == QMessageBox.Yes:
+            # Remove extensions records for all child entries.
             for i in range(category_item.childCount()):
                 entry_item = category_item.child(i)
                 entry_name = entry_item.text(0)
@@ -502,6 +683,7 @@ class EnhancedCompendiumWindow(QMainWindow):
                     del self.compendium_data["extensions"]["entries"][entry_name]
             root = self.tree.invisibleRootItem()
             root.removeChild(category_item)
+            # Remove from the canonical categories list.
             self.compendium_data["categories"] = [
                 cat for cat in self.compendium_data["categories"] if cat.get("name") != category_item.text(0)
             ]
@@ -515,11 +697,13 @@ class EnhancedCompendiumWindow(QMainWindow):
             _("Are you sure you want to delete the entry '{}'?").format(entry_name),
             QMessageBox.Yes | QMessageBox.No)
         if confirm == QMessageBox.Yes:
+            # Remove extensions record.
             if entry_name in self.compendium_data["extensions"]["entries"]:
                 del self.compendium_data["extensions"]["entries"][entry_name]
             parent = entry_item.parent()
             if parent:
                 parent.removeChild(entry_item)
+                # Remove from the canonical categories[].entries[] list.
                 for cat in self.compendium_data["categories"]:
                     if cat.get("name") == parent.text(0):
                         cat["entries"] = [e for e in cat.get("entries", []) if e.get("name") != entry_name]
@@ -536,9 +720,11 @@ class EnhancedCompendiumWindow(QMainWindow):
         if ok and new_text:
             if item_type == "entry":
                 old_name = current_text
+                # Rename the extensions key.
                 if old_name in self.compendium_data["extensions"]["entries"]:
                     self.compendium_data["extensions"]["entries"][new_text] = self.compendium_data["extensions"]["entries"][old_name]
                     del self.compendium_data["extensions"]["entries"][old_name]
+                # Rename in the canonical categories[].entries[] list.
                 for cat in self.compendium_data["categories"]:
                     if cat.get("name") == item.parent().text(0):
                         for entry in cat.get("entries", []):
@@ -550,6 +736,7 @@ class EnhancedCompendiumWindow(QMainWindow):
                     self.current_entry = new_text
                     self.entry_name_label.setText(new_text)
             else:
+                # Rename the category in the canonical list.
                 for cat in self.compendium_data["categories"]:
                     if cat.get("name") == current_text:
                         cat["name"] = new_text
@@ -576,7 +763,7 @@ class EnhancedCompendiumWindow(QMainWindow):
         self.save_compendium_to_file()
 
     def update_category_data(self, parent):
-        """Update category data to reflect the current order of items."""
+        """Sync categories[].entries[] order to match the current tree widget order."""
         category_name = parent.text(0) if parent != self.tree.invisibleRootItem() else None
         if category_name:
             for cat in self.compendium_data["categories"]:
@@ -608,10 +795,12 @@ class EnhancedCompendiumWindow(QMainWindow):
                 current_parent = entry_item.parent()
                 if current_parent is not None:
                     current_parent.removeChild(entry_item)
+                    # Remove from the old category's canonical list.
                     for cat in self.compendium_data["categories"]:
                         if cat.get("name") == current_parent.text(0):
                             cat["entries"] = [e for e in cat.get("entries", []) if e.get("name") != entry_item.text(0)]
                             break
+                # Add to the new category's canonical list.
                 for cat in self.compendium_data["categories"]:
                     if cat.get("name") == target_category.text(0):
                         cat["entries"].append({
@@ -626,36 +815,65 @@ class EnhancedCompendiumWindow(QMainWindow):
                 self.save_compendium_to_file()
 
     def on_item_changed(self, current, previous):
-        """Handle tree item selection changes, saving previous entry if dirty."""
-        if previous is not None and previous.data(0, Qt.UserRole) == "entry" and self.dirty:
-            self.save_entry(previous)
+        """Handle tree item selection changes with a Save/Discard/Cancel guard when dirty."""
+        if (
+            previous is not None
+            and previous.data(0, Qt.UserRole) == "entry"
+            and self.is_dirty()
+            and not self._suppress_unsaved_prompt
+        ):
+            entry_name = previous.text(0)
+            choice = QMessageBox.question(
+                self,
+                _("Unsaved Changes"),
+                _("You have unsaved changes for '{}'. Save before continuing?").format(entry_name),
+                QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+                QMessageBox.Save,
+            )
+            if choice == QMessageBox.Save:
+                self.save_current_entry()
+            elif choice == QMessageBox.Discard:
+                self._discard_current_entry_changes(reload_entry=False)
+            else:
+                # Cancel: revert the tree selection back to the dirty entry.
+                self.tree.blockSignals(True)
+                self.tree.setCurrentItem(previous)
+                self.tree.blockSignals(False)
+                return
+
         if current is None:
             self.clear_entry_ui()
             return
         item_type = current.data(0, Qt.UserRole)
         if item_type == "entry":
-            entry_name = current.text(0)
-            self.load_entry(entry_name, current)
+            self.load_entry(current.text(0), current)
         else:
             self.clear_entry_ui()
 
     def load_entry(self, entry_name, entry_item):
         """
         Load all data for the selected entry into the UI panels.
-        
+        Populates the Overview editor from categories[].entries[].content and the
+        Details/Tags/Relationships/Images panels from extensions.
+
         Args:
             entry_name (str): Name of the entry
             entry_item: The QTreeWidgetItem for this entry
         """
-        if hasattr(self, 'current_entry') and hasattr(self, 'current_entry_item') and self.dirty:
+        if hasattr(self, 'current_entry') and hasattr(self, 'current_entry_item') and self.is_dirty():
             self.save_current_entry()
         self.current_entry = entry_name
         self.current_entry_item = entry_item
         self.entry_name_label.setText(entry_name)
+        # Entry selected: show entry-specific actions; enabled state is handled by dirty tracking.
+        self.save_button.show()
+        self.revert_button.show()
+        # Block signals while loading to avoid spuriously marking dirty.
         self.editor.blockSignals(True)
         content = entry_item.data(1, Qt.UserRole)
         self.editor.setPlainText(content)
         self.editor.blockSignals(False)
+        # Load the enhanced extensions data if it exists.
         has_extended = entry_name in self.compendium_data["extensions"]["entries"]
         if has_extended:
             extended_data = self.compendium_data["extensions"]["entries"][entry_name]
@@ -664,6 +882,7 @@ class EnhancedCompendiumWindow(QMainWindow):
             self.details_editor.blockSignals(False)
             self.tags_list.clear()
             for tag in extended_data.get("tags", []):
+                # Tags can be stored as dicts {name, color} or plain strings (legacy).
                 if isinstance(tag, dict):
                     tag_name = tag.get("name", "")
                     tag_color = tag.get("color", "#000000")
@@ -685,19 +904,24 @@ class EnhancedCompendiumWindow(QMainWindow):
             self.tags_list.clear()
             self.relationships_list.clear()
             self.clear_images()
+            self._current_images = []
         self.update_entry_indicator()
-        self.dirty = False
+        self._reset_dirty()
         self.tabs.show()
 
     def clear_entry_ui(self):
         """Clear all entry data from the UI panels."""
         self.entry_name_label.setText(_("No entry selected"))
+        # No entry selected (or category selected): hide entry-specific action buttons.
+        self.save_button.hide()
+        self.revert_button.hide()
         self.editor.clear()
         self.details_editor.clear()
         self.tags_list.clear()
         self.relationships_list.clear()
         self.clear_images()
-        self.dirty = False
+        self._current_images = []
+        self._reset_dirty()
         self.tabs.hide()
         if hasattr(self, 'current_entry'):
             del self.current_entry
@@ -711,12 +935,34 @@ class EnhancedCompendiumWindow(QMainWindow):
             if child.widget():
                 child.widget().deleteLater()
 
-    def open_with_entry(self, project_name, entry_name):
-        """Make visible and raise window, then show the entry."""
-        self.populate_project_combo(project_name)
-        self.change_project(project_name)
-        self.show()
+    def _ensure_window_visible(self):
+        """Ensure this window is restored, visible, and focused for user prompts."""
+        if self.isMinimized():
+            self.showNormal()
+        else:
+            self.show()
         self.raise_()
+        self.activateWindow()
+
+    def open_with_entry(self, project_name, entry_name):
+        """Make visible and raise window, then show the entry.
+
+        Respects the dirty state of the currently selected entry: if there are
+        unsaved changes the user will be prompted to Save / Discard / Cancel.
+        The operation is aborted when the user chooses Cancel.
+        """
+        # Show the window before prompting so the dialog context is obvious.
+        self._ensure_window_visible()
+
+        if not self.maybe_commit_unsaved_changes():
+            return
+        if project_name != self.project_name:
+            self.populate_project_combo(project_name)
+            self.change_project(project_name)
+
+        # Project switches can affect focus/state; enforce visibility again.
+        self._ensure_window_visible()
+
         if entry_name:
             self.find_and_select_entry(entry_name)
 
@@ -732,7 +978,7 @@ class EnhancedCompendiumWindow(QMainWindow):
                     return
 
     def update_relation_combo(self):
-        """Update the relationship combo box with all entry names."""
+        """Repopulate the relationship combo from the canonical categories[].entries[] list."""
         self.relationship_combo.clear()
         entries = []
         for cat in self.compendium_data.get("categories", []):
@@ -752,7 +998,7 @@ class EnhancedCompendiumWindow(QMainWindow):
             item.setToolTip(_("right-click to move the tag within this list - this impacts the colour of your entry"))
             self.tags_list.addItem(item)
             self.tag_input.clear()
-            self.mark_dirty()
+            self.mark_dirty("tags")
 
     def choose_tag_color(self):
         """Open a color dialog to choose a tag color."""
@@ -760,7 +1006,7 @@ class EnhancedCompendiumWindow(QMainWindow):
         if color.isValid():
             self.tag_color_button.setProperty("current_color", color.name())
             self.tag_color_button.setStyleSheet(f"background-color: {color.name()};")
-            self.mark_dirty()
+            self.mark_dirty("tags")
 
     def show_tags_context_menu(self, pos):
         """Show context menu for tags list."""
@@ -776,7 +1022,7 @@ class EnhancedCompendiumWindow(QMainWindow):
         """Remove a tag from the tags list."""
         row = self.tags_list.row(item)
         self.tags_list.takeItem(row)
-        self.mark_dirty()
+        self.mark_dirty("tags")
 
     def move_tag(self, item, direction):
         """Move a tag up or down in the tags list."""
@@ -789,7 +1035,7 @@ class EnhancedCompendiumWindow(QMainWindow):
             self.tags_list.takeItem(row)
             self.tags_list.insertItem(row + 1, item)
             self.tags_list.setCurrentItem(item)
-        self.mark_dirty()
+        self.mark_dirty("tags")
 
     def add_relationship(self):
         """Add a new relationship to the current entry."""
@@ -799,7 +1045,7 @@ class EnhancedCompendiumWindow(QMainWindow):
             rel_item = QTreeWidgetItem([rel_name, rel_type])
             self.relationships_list.addTopLevelItem(rel_item)
             self.relationship_type.clear()
-            self.mark_dirty()
+            self.mark_dirty("relationships")
 
     def show_relationships_context_menu(self, pos):
         """Show context menu for relationships list."""
@@ -813,24 +1059,26 @@ class EnhancedCompendiumWindow(QMainWindow):
         """Remove a relationship from the relationships list."""
         index = self.relationships_list.indexOfTopLevelItem(item)
         self.relationships_list.takeTopLevelItem(index)
-        self.mark_dirty()
+        self.mark_dirty("relationships")
 
     def add_image(self):
         """Add an image to the current entry."""
-        file_name, _unused = QFileDialog.getOpenFileName(self, _("Select Image"), "", _("Images (*.png *.jpg *.jpeg *.bmp)"))
+        file_name, _unused = QFileDialog.getOpenFileName(self, _("Select Image"), "",
+                                                         _("Images (*.png *.jpg *.jpeg *.bmp)"))
         if file_name and hasattr(self, 'current_entry'):
             pixmap = QPixmap(file_name)
             if not pixmap.isNull():
                 label = QLabel()
                 label.setPixmap(pixmap.scaled(100, 100, Qt.KeepAspectRatio))
                 self.image_layout.addWidget(label)
-                self.compendium_data["extensions"]["entries"][self.current_entry]["images"].append(file_name)
-                self.mark_dirty()
+                self._current_images.append(file_name)
+                self.mark_dirty("images")
 
     def load_images(self, images):
         """Load images into the images tab."""
+        self._current_images = list(images or [])
         self.clear_images()
-        for image_path in images:
+        for image_path in self._current_images:
             pixmap = QPixmap(image_path)
             if not pixmap.isNull():
                 label = QLabel()
@@ -840,13 +1088,14 @@ class EnhancedCompendiumWindow(QMainWindow):
     def get_images(self):
         """Return the list of image paths for the current entry."""
         if hasattr(self, 'current_entry'):
-            return self.compendium_data["extensions"]["entries"].get(self.current_entry, {}).get("images", [])
+            return list(self._current_images)
         return []
 
     def update_entry_indicator(self):
-        """Update the entry indicator based on relationships (green if has relationships)."""
+        """Update the entry name label colour: green if the entry has any relationships."""
         if hasattr(self, 'current_entry'):
-            relationships = self.compendium_data["extensions"]["entries"].get(self.current_entry, {}).get("relationships", [])
+            relationships = self.compendium_data["extensions"]["entries"].get(self.current_entry, {}).get(
+                "relationships", [])
             if relationships:
                 self.entry_name_label.setStyleSheet("font-size: 16pt; font-weight: bold; color: green;")
             else:
@@ -858,7 +1107,7 @@ class EnhancedCompendiumWindow(QMainWindow):
             self.populate_compendium()
 
     def filter_tree(self):
-        """Filter the tree based on search bar input (entries and tags)."""
+        """Filter tree items by entry name or tag name matching the search bar text."""
         search_text = self.search_bar.text().lower()
         for i in range(self.tree.topLevelItemCount()):
             cat_item = self.tree.topLevelItem(i)

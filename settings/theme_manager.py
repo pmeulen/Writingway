@@ -22,6 +22,23 @@ class ThemeManager(QObject):
 
     _instance = None
     _icon_cache = {}  # Cache: (file_path, tint_color) -> QIcon
+    _DISABLED_BUTTON_STYLE = """
+            QPushButton:disabled {
+                background-color: rgba(128, 128, 128, 0.20);
+                color: rgba(128, 128, 128, 0.95);
+                border: 1px solid rgba(128, 128, 128, 0.35);
+            }
+            QPushButton[primary=\"true\"]:disabled {
+                background-color: rgba(128, 128, 128, 0.22);
+                color: rgba(128, 128, 128, 0.98);
+                border: 1px solid rgba(128, 128, 128, 0.40);
+            }
+            QToolButton:disabled {
+                color: rgba(128, 128, 128, 0.90);
+                background-color: rgba(128, 128, 128, 0.12);
+                border: 1px solid rgba(128, 128, 128, 0.25);
+            }
+    """
 
     def __new__(cls):
         if cls._instance is None:
@@ -812,7 +829,9 @@ class ThemeManager(QObject):
 
     @classmethod
     def get_stylesheet(cls, theme_name):
-        return cls.THEMES.get(theme_name, cls.THEMES["Notion Light"])
+        base_stylesheet = cls.THEMES.get(theme_name, cls.THEMES["Notion Light"])
+        # Keep disabled buttons visually obvious across all themes.
+        return f"{base_stylesheet}\n{cls._DISABLED_BUTTON_STYLE}"
 
     @classmethod
     def apply_theme(cls, widget, theme_name):
