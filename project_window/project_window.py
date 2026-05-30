@@ -837,7 +837,14 @@ class ProjectWindow(QMainWindow):
     def update_pov_character_dropdown(self):
         characters = []
         try:
-            characters = self.model.compendium.get_characters()
+            chars_cat = next(
+                (cat for cat in self.model.compendium.list_categories() if cat["name"].lower() == "characters"),
+                None
+            )
+            if chars_cat:
+                # Preserve compendium canonical order rather than forcing alphabetical
+                character_dicts = self.model.compendium.list_entries(chars_cat["uuid"])
+                characters = [d["name"] for d in character_dicts]
         except Exception as e:
             print(f"Error loading characters from compendium: {e}")
         if not characters:

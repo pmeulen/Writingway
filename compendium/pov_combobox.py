@@ -40,7 +40,16 @@ class POVComboBox(QComboBox):
 
     def populate_combo(self) -> None:
         self.clear()
-        characters = self.compendium.get_characters()
+        chars_cat = next(
+            (cat for cat in self.compendium.list_categories() if cat["name"].lower() == "characters"),
+            None
+        )
+        if chars_cat:
+            # Preserve the compendium's canonical ordering for POV choices
+            character_dicts = self.compendium.list_entries(chars_cat["uuid"])
+            characters = [d["name"] for d in character_dicts]
+        else:
+            characters = []
         characters.append(_("Custom..."))
         self.addItems(characters)
         self.currentIndexChanged.connect(self.handle_pov_character_change)
@@ -108,7 +117,18 @@ class POVComboBox(QComboBox):
 
     def add_character_to_compendium(self, name, description):
         try:
-            self.compendium.add_character(name, description)
+            chars_cat = next(
+                (cat for cat in self.compendium.list_categories() if cat["name"].lower() == "characters"),
+                None
+            )
+            if not chars_cat:
+                chars_cat = self.compendium.add_category("Characters")
+            entries = self.compendium.list_entries(chars_cat["uuid"])
+            existing = next((e for e in entries if e["name"] == name), None)
+            if existing:
+                self.compendium.update_entry(existing["uuid"], {"content": description})
+            else:
+                self.compendium.add_entry(chars_cat["uuid"], name, description)
         except Exception as e:
             print(f"Error saving compendium: {e}")
             QMessageBox.warning(self, _("Error"), _("Failed to save compendium: {}").format(str(e)))

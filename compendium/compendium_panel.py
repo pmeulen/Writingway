@@ -49,7 +49,7 @@ class CompendiumPanel(QWidget):
             try:
                 with open(self.old_compendium_file, encoding="utf-8") as f:
                     old_data = json.load(f)
-                self.manager.save_data(old_data)
+                self.manager.upsert_data(old_data)
                 os.remove(self.old_compendium_file)
                 if DEBUG:
                     print("Migrated compendium data to", self.compendium_file)
@@ -67,26 +67,32 @@ class CompendiumPanel(QWidget):
         self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self.show_tree_context_menu)
         self.tree.currentItemChanged.connect(self.on_item_changed)
+        # Double-click will trigger rename via dialog (same as context menu behavior)
         self.tree.itemDoubleClicked.connect(self.on_item_double_clicked)
         layout.addWidget(self.tree)
         self.populate_compendium()
 
     def populate_compendium(self):
         selected_item_info = self.get_selected_item_info()
+        # Build the tree without making items editable (renames use dialog)
         self.tree.clear()
         bold_font = QFont()
         bold_font.setBold(True)
-        data = self.manager.load_data()
-        if DEBUG:
-            print("Compendium data loaded:", data)
 
-        for cat in data.get("categories", []):
-            cat_item = QTreeWidgetItem(self.tree, [cat.get("name", "Unnamed Category")])
+        for cat_info in self.manager.list_categories():
+            cat_uuid = cat_info["uuid"]
+            cat_name = cat_info["name"]
+            if DEBUG:
+                print("Category:", cat_name, cat_uuid)
+            cat_item = QTreeWidgetItem(self.tree, [cat_name])
             cat_item.setData(0, Qt.UserRole, "category")
-            cat_item.setData(0, Qt.ItemDataRole.UserRole + 1, "true")
+            cat_item.setData(0, Qt.ItemDataRole.UserRole + 1, cat_uuid)
             cat_item.setBackground(0, QBrush(ThemeManager.get_category_background_color()))
             cat_item.setFont(0, bold_font)
-            for entry in sorted(cat.get("entries", []), key=lambda e: e.get("name", "")):
+            # Preserve the canonical entry order from categories[].entries[] instead
+            # of forcing an alphabetical sort. The compendium's canonical list
+            # should dictate display order.
+            for entry in self.manager.list_entries(cat_uuid):
                 entry_item = QTreeWidgetItem(cat_item, [entry.get("name", "Unnamed Entry")])
                 entry_item.setData(0, Qt.UserRole, "entry")
                 entry_item.setData(1, Qt.UserRole, entry.get("content", ""))
@@ -101,9 +107,9 @@ class CompendiumPanel(QWidget):
         item_type = current_item.data(0, Qt.UserRole)
         item_name = current_item.text(0)
         if item_type == "entry":
-            parent_item = current_item.parent()
-            parent_name = parent_item.text(0) if parent_item else None
-            return {"type": "entry", "name": item_name, "category": parent_name}
+            entry_uuid = current_item.data(2, Qt.UserRole)
+            # Rely on UUID for restoring selection; entries always have UUIDs.
+            return {"type": "entry", "name": item_name, "uuid": entry_uuid}
         return {"type": "category", "name": item_name}
 
     def restore_selection(self, selected_item_info):
@@ -118,22 +124,16 @@ class CompendiumPanel(QWidget):
                     self.tree.setCurrentItem(cat_item)
                     return
         elif item_type == "entry":
-            category_name = selected_item_info["category"]
-            for i in range(self.tree.topLevelItemCount()):
-                cat_item = self.tree.topLevelItem(i)
-                if category_name and cat_item.text(0) != category_name:
-                    continue
-                for j in range(cat_item.childCount()):
-                    entry_item = cat_item.child(j)
-                    if entry_item.text(0) == item_name and entry_item.data(0, Qt.UserRole) == "entry":
-                        self.tree.setCurrentItem(entry_item)
-                        return
-                if category_name and cat_item.text(0) == category_name:
-                    if cat_item.childCount() > 0:
-                        self.tree.setCurrentItem(cat_item.child(0))
-                    else:
-                        self.tree.setCurrentItem(cat_item)
-                    return
+            # Restore selection by UUID only — CompendiumManager guarantees UUIDs.
+            entry_uuid = selected_item_info.get("uuid")
+            if entry_uuid:
+                for i in range(self.tree.topLevelItemCount()):
+                    cat_item = self.tree.topLevelItem(i)
+                    for j in range(cat_item.childCount()):
+                        entry_item = cat_item.child(j)
+                        if entry_item.data(2, Qt.UserRole) == entry_uuid:
+                            self.tree.setCurrentItem(entry_item)
+                            return
         self.tree.clearSelection()
 
     def on_item_changed(self, current, previous):
@@ -152,6 +152,9 @@ class CompendiumPanel(QWidget):
         """Open the double-clicked entry in the Enhanced Compendium."""
         if item and item.data(0, Qt.UserRole) == "entry":
             self.open_in_enhanced_compendium()
+
+
+
 
     def show_tree_context_menu(self, pos: QPoint):
         menu = QMenu(self)
@@ -181,7 +184,7 @@ class CompendiumPanel(QWidget):
             QMessageBox.warning(self, _("Warning"), _("No scene content available to analyze."))
             return
         scene_content = scene_editor.toPlainText()
-        current_compendium = self.manager.load_data()
+        current_compendium = self.manager.get_summary_for_prompt()
         overrides = LLMSettingsDialog.show_dialog(
             self,
             default_provider=WWSettingsManager.get_active_llm_name(),
@@ -222,7 +225,7 @@ Return only the JSON result without additional commentary. The JSON should maint
         )
         prompt = analysis_template.format(
             scene_content=scene_content,
-            existing_compendium=json.dumps(current_compendium, indent=2)
+            existing_compendium=current_compendium
         )
         try:
             response = WWApiAggregator.send_prompt_to_llm(prompt, overrides=overrides)

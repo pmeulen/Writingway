@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QToolBar, QSplitter, QTreeWid
                              QLineEdit, QComboBox, QPushButton, QListWidget, QTabWidget, QFileDialog, QMessageBox, QTreeWidgetItem,
                              QScrollArea, QFormLayout, QGroupBox, QInputDialog, QMenu, QColorDialog, QSizePolicy, QListWidgetItem,
                              QFrame)
-from PyQt5.QtCore import Qt, QSettings
+from PyQt5.QtCore import Qt, QSettings, QTimer
 from PyQt5.QtGui import QPixmap, QColor, QBrush, QFont
 from compendium.compendium_manager import CompendiumManager, CompendiumEventBus
 from settings.theme_manager import ThemeManager
@@ -69,6 +69,13 @@ class EnhancedCompendiumWindow(QMainWindow):
         # Guard used to avoid nested Save/Discard prompts caused by tree selection
         # changes during programmatic save/refresh flows.
         self._suppress_unsaved_prompt = False
+        # When a selection change is cancelled by the unsaved-changes guard we
+        # set this flag so subsequent handlers (context menus, mouse handlers)
+        # triggered by the same user event can detect the cancelled selection
+        # and avoid acting on the transiently-clicked item. This flag is
+        # consumed by the context-menu handler and by the restore helper so it
+        # only applies to the single originating event.
+        self._last_selection_cancelled = False
         # Pending image paths for the currently loaded entry. This mirrors the UI
         # state and is written to compendium_data only on explicit Save.
         self._current_images = []
@@ -274,9 +281,14 @@ class EnhancedCompendiumWindow(QMainWindow):
         if projects:
             projects.sort()
             self.project_combo.addItems(projects)
-            # Match by sanitized name (strips non-word chars to match folder names)
-            index = self.project_combo.findText(self.sanitize(project_name))
+            # Match by the exact project display name first; fall back to the
+            # sanitized form used for filesystem names so callers that pass a
+            # sanitized or unsanitized project name both work.
+            index = self.project_combo.findText(project_name)
             if index < 0:
+                index = self.project_combo.findText(self.sanitize(project_name))
+            if index < 0:
+                # Default to the first project in the list if none matched.
                 self.project_combo.setCurrentIndex(0)
                 self.project_name = self.project_combo.currentText()
             else:
@@ -474,6 +486,8 @@ class EnhancedCompendiumWindow(QMainWindow):
         """Connect all necessary signals for interactive functionality."""
         self.tree.customContextMenuRequested.connect(self.show_context_menu)
         self.tree.currentItemChanged.connect(self.on_item_changed)
+        # Double-click should invoke the same rename dialog as the context menu
+        self.tree.itemDoubleClicked.connect(self.on_item_double_clicked)
         self.search_bar.textChanged.connect(self.filter_tree)
         self.save_button.clicked.connect(self.save_current_entry)
         self.revert_button.clicked.connect(self.revert_current_entry)
@@ -490,6 +504,8 @@ class EnhancedCompendiumWindow(QMainWindow):
     def sanitize(self, text):
         """Sanitize text by removing non-word characters for safe filenames."""
         return re.sub(r'\W+', '', text)
+ 
+
 
     def _entry_uuid_from_item(self, entry_item):
         """Return an entry's UUID from tree item data, creating one if missing."""
@@ -499,39 +515,66 @@ class EnhancedCompendiumWindow(QMainWindow):
             entry_item.setData(2, Qt.UserRole, entry_uuid)
         return entry_uuid
 
+    def _category_uuid_from_item(self, cat_item):
+        """Return a category's UUID from tree item data (stored in column 1, Qt.UserRole)."""
+        return cat_item.data(1, Qt.UserRole) or ""
+
     def _find_entry_in_data(self, entry_uuid):
-        """Return the entry dict from categories for the given uuid, or None."""
-        for cat in self.compendium_data.get("categories", []):
-            for entry in cat.get("entries", []):
-                if entry.get("uuid") == entry_uuid:
-                    return entry
-        return None
+        """Return the entry dict for the given uuid from the manager, or None."""
+        return self.manager.get_entry_by_uuid(entry_uuid)
+
+    def _find_and_select_entry_by_uuid(self, entry_uuid: str) -> bool:
+        """Find an entry in the tree by uuid and select it.
+
+        Returns True if found, False otherwise.
+        """
+        for i in range(self.tree.topLevelItemCount()):
+            cat_item = self.tree.topLevelItem(i)
+            for j in range(cat_item.childCount()):
+                item = cat_item.child(j)
+                if item.data(2, Qt.UserRole) == entry_uuid:
+                    self.tree.setCurrentItem(item)
+                    return True
+        return False
 
     def populate_compendium(self):
         """Populate the tree view with compendium data from the manager."""
         selected_item_info = self.get_selected_item_info()
-        self.tree.clear()
-        bold_font = QFont()
-        bold_font.setBold(True)
-        # Always reload from disk so the tree reflects the authoritative file state.
-        # Migration of any legacy formats is performed by CompendiumManager;
-        # EnhancedCompendium should only consume the canonical unified structure.
-        self.compendium_data = self.manager.load_data()
-        for cat in self.compendium_data.get("categories", []):
-            cat_name = cat.get("name")
-            cat_item = QTreeWidgetItem(self.tree, [cat_name])
-            cat_item.setData(0, Qt.UserRole, "category")
-            cat_item.setBackground(0, QBrush(ThemeManager.get_category_background_color()))
-            cat_item.setFont(0, bold_font)
-            # Entries are sourced from categories[].entries[] — the canonical list.
-            for entry in sorted(cat.get("entries", []), key=lambda e: e.get("name", "")):
-                entry_name = entry.get("name", "Unnamed Entry")
-                entry_item = QTreeWidgetItem(cat_item, [entry_name])
-                entry_item.setData(0, Qt.UserRole, "entry")
-                entry_item.setData(1, Qt.UserRole, entry.get("content", ""))
-                entry_item.setData(2, Qt.UserRole, entry.get("uuid", str(uuid.uuid4())))
-                cat_item.setExpanded(True)
+        # Block signals while rebuilding the tree to avoid spurious itemChanged
+        # handling when we set item texts/programmatic data.
+        self.tree.blockSignals(True)
+        try:
+            self.tree.clear()
+            bold_font = QFont()
+            bold_font.setBold(True)
+            # Always reload from disk so the tree reflects the authoritative file state.
+            # Migration of any legacy formats is performed by CompendiumManager;
+            # EnhancedCompendium should only consume the canonical unified structure.
+            self.compendium_data = self.manager.load_data()
+            # reset any pending rename originals
+            self._rename_originals = {}
+            for cat in self.compendium_data.get("categories", []):
+                cat_name = cat.get("name")
+                cat_item = QTreeWidgetItem(self.tree, [cat_name])
+                cat_item.setData(0, Qt.UserRole, "category")
+                cat_item.setData(1, Qt.UserRole, cat.get("uuid", ""))
+                cat_item.setBackground(0, QBrush(ThemeManager.get_category_background_color()))
+                cat_item.setFont(0, bold_font)
+                # Entries are sourced from categories[].entries[] — the canonical list.
+                # Preserve the canonical order as authored in the compendium file
+                # instead of forcing an alphabetical sort here.
+                for entry in cat.get("entries", []):
+                    entry_name = entry.get("name", "Unnamed Entry")
+                    entry_item = QTreeWidgetItem(cat_item, [entry_name])
+                    entry_item.setData(0, Qt.UserRole, "entry")
+                    entry_item.setData(1, Qt.UserRole, entry.get("content", ""))
+                    entry_item.setData(2, Qt.UserRole, entry.get("uuid", str(uuid.uuid4())))
+                    cat_item.setExpanded(True)
+        finally:
+            self.tree.blockSignals(False)
         self.restore_selection(selected_item_info)
+        if self.tree.currentItem() is None:
+            self.clear_entry_ui()
         self.update_relation_combo()
 
     def get_selected_item_info(self):
@@ -542,9 +585,9 @@ class EnhancedCompendiumWindow(QMainWindow):
         item_type = current_item.data(0, Qt.UserRole)
         item_name = current_item.text(0)
         if item_type == "entry":
-            parent_item = current_item.parent()
-            parent_name = parent_item.text(0) if parent_item else None
-            return {"type": "entry", "name": item_name, "category": parent_name}
+            entry_uuid = current_item.data(2, Qt.UserRole)
+            # Preserve uuid for robust matching even if the entry was renamed or moved to another category.
+            return {"type": "entry", "name": item_name, "uuid": entry_uuid}
         return {"type": "category", "name": item_name}
 
     def restore_selection(self, selected_item_info):
@@ -560,28 +603,34 @@ class EnhancedCompendiumWindow(QMainWindow):
                     self.tree.setCurrentItem(cat_item)
                     return
         elif item_type == "entry":
-            category_name = selected_item_info["category"]
-            for i in range(self.tree.topLevelItemCount()):
-                cat_item = self.tree.topLevelItem(i)
-                if category_name and cat_item.text(0) != category_name:
-                    continue
-                for j in range(cat_item.childCount()):
-                    entry_item = cat_item.child(j)
-                    if entry_item.text(0) == item_name and entry_item.data(0, Qt.UserRole) == "entry":
-                        self.tree.setCurrentItem(entry_item)
-                        return
-                if category_name and cat_item.text(0) == category_name:
-                    if cat_item.childCount() > 0:
-                        self.tree.setCurrentItem(cat_item.child(0))
-                    else:
-                        self.tree.setCurrentItem(cat_item)
-                    return
+            # Restore selection by UUID only — CompendiumManager guarantees UUIDs.
+            entry_uuid = selected_item_info.get("uuid")
+            if entry_uuid:
+                for i in range(self.tree.topLevelItemCount()):
+                    cat_item = self.tree.topLevelItem(i)
+                    for j in range(cat_item.childCount()):
+                        entry_item = cat_item.child(j)
+                        if entry_item.data(2, Qt.UserRole) == entry_uuid:
+                            self.tree.setCurrentItem(entry_item)
+                            return
         self.tree.clearSelection()
 
     def show_context_menu(self, pos):
-        """Show context menu for tree items with appropriate actions."""
+        """
+        Show context menu for tree items (category / entry) with appropriate actions.
+        """
+        # If a recent selection change was cancelled by the unsaved-changes
+        # prompt, the context menu requested by the same mouse event should
+        # not be shown for the target item. Consume the cancelled state here
+        # and return early.
+        if getattr(self, '_last_selection_cancelled', False):
+            # reset the flag and do not show any menu for the cancelled click
+            self._last_selection_cancelled = False
+            return
+
         item = self.tree.itemAt(pos)
         menu = QMenu(self)
+        menu.setStyleSheet(ThemeManager.get_menu_stylesheet())
         if item:
             item_type = item.data(0, Qt.UserRole)
             if item_type == "category":
@@ -591,12 +640,34 @@ class EnhancedCompendiumWindow(QMainWindow):
             elif item_type == "entry":
                 menu.addAction(_("Rename Entry"), lambda: self.rename_item(item, "entry"))
                 menu.addAction(_("Delete Entry"), lambda: self.delete_entry(item))
-                menu.addAction(_("Move Up"), lambda: self.move_item(item, "up"))
-                menu.addAction(_("Move Down"), lambda: self.move_item(item, "down"))
-                menu.addAction(_("Move to Category"), lambda: self.move_entry(item))
+                # Add Move Up/Down actions but disable them when at the bounds of the category
+                move_up_action = menu.addAction(_("Move Up"), lambda: self.move_item(item, "up"))
+                move_down_action = menu.addAction(_("Move Down"), lambda: self.move_item(item, "down"))
+                # Determine position within its parent category so we can disable impossible moves
+                parent = item.parent() or self.tree.invisibleRootItem()
+                if parent is not None:
+                    index = parent.indexOfChild(item)
+                    if index <= 0:
+                        move_up_action.setEnabled(False)
+                    if index >= max(0, parent.childCount() - 1):
+                        move_down_action.setEnabled(False)
+                # Disable "Move to Category" when there are fewer than two categories
+                move_action = menu.addAction(_("Move to Category"), lambda: self.move_entry(item))
+                num_categories = len(self.compendium_data.get("categories", []))
+                if num_categories < 2:
+                    move_action.setEnabled(False)
         else:
             menu.addAction(_("New Category"), self.new_category)
         menu.exec_(self.tree.viewport().mapToGlobal(pos))
+    def on_item_double_clicked(self, item, column):
+        """Invoke the same rename dialog used by the context menu when double-clicked."""
+        if item is None:
+            return
+        item_type = item.data(0, Qt.UserRole)
+        if item_type == "entry":
+            self.rename_item(item, "entry")
+        elif item_type == "category":
+            self.rename_item(item, "category")
 
     def save_current_entry(self):
         """Save the current entry's data to the compendium."""
@@ -613,8 +684,8 @@ class EnhancedCompendiumWindow(QMainWindow):
 
     def save_entry(self, entry_item):
         """
-        Persist the currently displayed entry back to self.compendium_data and then to disk.
-        Updates the unified categories[].entries[] record with all fields: content, uuid,
+        Persist the currently displayed entry back to disk via the manager.
+        Updates the unified categories[].entries[] record with all fields: content,
         details, tags, relationships, and images.
         """
         entry_name = entry_item.text(0)
@@ -624,10 +695,9 @@ class EnhancedCompendiumWindow(QMainWindow):
             return False
         category_name = category_item.text(0)
         content = self.editor.toPlainText()
-        # Keep the tree item's cached content in sync.
+        # Keep the tree item's cached content in sync before the tree is rebuilt.
         entry_item.setData(1, Qt.UserRole, content)
 
-        # Collect enhanced-only fields from the UI.
         details = self.details_editor.toPlainText()
         tags = [
             {"name": self.tags_list.item(i).text(), "color": self.tags_list.item(i).data(Qt.UserRole)}
@@ -639,180 +709,142 @@ class EnhancedCompendiumWindow(QMainWindow):
         ]
         images = self.get_images()
 
-        # Update the unified entry in categories[].entries[].
-        for cat in self.compendium_data["categories"]:
-            if cat.get("name") == category_name:
-                for entry in cat.get("entries", []):
-                    if entry.get("name") == entry_name:
-                        entry["content"] = content
-                        entry["uuid"] = entry_uuid
-                        entry["details"] = details
-                        entry["tags"] = tags
-                        entry["relationships"] = relationships
-                        entry["images"] = images
-                        break
-                else:
-                    # Entry not yet in the list — add it (safety fallback).
-                    new_entry = self.manager.make_empty_entry(entry_name, content)
-                    new_entry["uuid"] = entry_uuid
-                    new_entry["details"] = details
-                    new_entry["tags"] = tags
-                    new_entry["relationships"] = relationships
-                    new_entry["images"] = images
-                    cat["entries"].append(new_entry)
-                break
+        fields = {
+            "name": entry_name,
+            "content": content,
+            "details": details,
+            "tags": tags,
+            "relationships": relationships,
+            "images": images,
+        }
 
-        return self.save_compendium_to_file()
-
-    def save_compendium_to_file(self):
-        """Save the compendium data back to the file via the manager."""
-        try:
-            self.manager.save_data(self.compendium_data)
-            if DEBUG:
-                print("Saved compendium data to", self.compendium_file)
-            return True
-        except Exception as e:
-            if DEBUG:
-                print("Error saving compendium data:", e)
-            QMessageBox.warning(self, _("Error"), _("Failed to save compendium data: {}").format(str(e)))
-            return False
+        ok = self.manager.update_entry(entry_uuid, fields)
+        if not ok:
+            # Safety fallback: entry missing from disk (e.g. corrupted state) — re-add it.
+            print(f"Warning: entry uuid {entry_uuid} not found. Re-adding to category '{category_name}'.")
+            category_uuid = self._category_uuid_from_item(category_item)
+            new_entry = self.manager.add_entry(category_uuid, entry_name, content)
+            if new_entry:
+                entry_item.setData(2, Qt.UserRole, new_entry["uuid"])
+                self.manager.update_entry(new_entry["uuid"], fields)
+                ok = True
+        return ok
 
     def new_category(self):
         """Create a new category in the compendium."""
+        # Respect unsaved-change guard: abort if the user cancels the save prompt.
+        if not self.maybe_commit_unsaved_changes():
+            return
+
         name, ok = QInputDialog.getText(self, _("New Category"), _("Category name:"))
         if ok and name:
-            cat_item = QTreeWidgetItem(self.tree, [name])
-            cat_item.setData(0, Qt.UserRole, "category")
-            cat_item.setBackground(0, QBrush(ThemeManager.get_category_background_color()))
-            cat_item.setFont(0, QFont("", weight=QFont.Bold))
-            # Add to the canonical categories list and persist.
-            self.compendium_data["categories"].append(self.manager.make_empty_category(name))
-            self.save_compendium_to_file()
+            self.manager.add_category(name)
+            # Tree is rebuilt by the event bus; find and select the new category.
+            for i in range(self.tree.topLevelItemCount()):
+                if self.tree.topLevelItem(i).text(0) == name:
+                    self.tree.setCurrentItem(self.tree.topLevelItem(i))
+                    break
 
     def new_entry(self, category_item):
         """Create a new entry under the specified category."""
+        # If there are unsaved changes on another entry, ask the user first.
+        if not self.maybe_commit_unsaved_changes():
+            return
+
         name, ok = QInputDialog.getText(self, _("New Entry"), _("Entry name:"))
         if ok and name:
-            new_entry_dict = self.manager.make_empty_entry(name)
-            new_uuid = new_entry_dict["uuid"]
-
-            entry_item = QTreeWidgetItem(category_item, [name])
-            entry_item.setData(0, Qt.UserRole, "entry")
-            entry_item.setData(1, Qt.UserRole, "")
-            entry_item.setData(2, Qt.UserRole, new_uuid)
-
-            # Add unified entry to canonical categories[].entries[] so the entry is
-            # visible to the rest of the app (project compendium panel, POV selector, AI context).
-            for cat in self.compendium_data["categories"]:
-                if cat.get("name") == category_item.text(0):
-                    cat["entries"].append(new_entry_dict)
-                    break
-
-            category_item.setExpanded(True)
-            self.tree.setCurrentItem(entry_item)
-            self.save_compendium_to_file()
-            self.update_relation_combo()
+            category_uuid = self._category_uuid_from_item(category_item)
+            new_entry_dict = self.manager.add_entry(category_uuid, name)
+            if new_entry_dict:
+                # Tree is rebuilt by the event bus; find and select the new entry.
+                self._find_and_select_entry_by_uuid(new_entry_dict["uuid"])
 
     def delete_category(self, category_item):
         """Delete a category and all its entries after confirmation."""
+        # Respect unsaved changes guard before destructive operations.
+        if not self.maybe_commit_unsaved_changes():
+            return
+
         confirm = QMessageBox.question(self, _("Confirm Deletion"),
             _("Are you sure you want to delete the category '{}' and all its entries?").format(category_item.text(0)),
             QMessageBox.Yes | QMessageBox.No)
         if confirm == QMessageBox.Yes:
-            root = self.tree.invisibleRootItem()
-            root.removeChild(category_item)
-            # Remove from the canonical categories list.
-            self.compendium_data["categories"] = [
-                cat for cat in self.compendium_data["categories"] if cat.get("name") != category_item.text(0)
-            ]
-            self.save_compendium_to_file()
-            self.update_relation_combo()
+            category_uuid = self._category_uuid_from_item(category_item)
+            self.manager.remove_category(category_uuid)
+            # Tree is rebuilt by the event bus.
 
     def delete_entry(self, entry_item):
         """Delete an entry after confirmation."""
+        # Respect unsaved changes guard before destructive operations.
+        if not self.maybe_commit_unsaved_changes():
+            return
+
         entry_name = entry_item.text(0)
+        entry_uuid = entry_item.data(2, Qt.UserRole)
         confirm = QMessageBox.question(self, _("Confirm Deletion"),
             _("Are you sure you want to delete the entry '{}'?").format(entry_name),
             QMessageBox.Yes | QMessageBox.No)
         if confirm == QMessageBox.Yes:
-            parent = entry_item.parent()
-            if parent:
-                parent.removeChild(entry_item)
-                # Remove from the canonical categories[].entries[] list.
-                for cat in self.compendium_data["categories"]:
-                    if cat.get("name") == parent.text(0):
-                        cat["entries"] = [e for e in cat.get("entries", []) if e.get("name") != entry_name]
-                        break
-            self.save_compendium_to_file()
-            if hasattr(self, 'current_entry') and self.current_entry == entry_name:
-                self.clear_entry_ui()
-            self.update_relation_combo()
+            self.manager.remove_entry(entry_uuid)
+            # Tree is rebuilt by the event bus (which also calls clear_entry_ui if needed).
 
     def rename_item(self, item, item_type):
         """Rename a category or entry."""
+        # Respect unsaved changes guard before mutating data.
+        if not self.maybe_commit_unsaved_changes():
+            return
+
         current_text = item.text(0)
         new_text, ok = QInputDialog.getText(self, _("Rename {}").format(item_type.capitalize()), _("New name:"), text=current_text)
         if ok and new_text:
             if item_type == "entry":
-                old_name = current_text
-                # Rename in the canonical categories[].entries[] list.
-                for cat in self.compendium_data["categories"]:
-                    if cat.get("name") == item.parent().text(0):
-                        for entry in cat.get("entries", []):
-                            if entry.get("name") == old_name:
-                                entry["name"] = new_text
-                                break
-                item.setText(0, new_text)
-                if hasattr(self, 'current_entry') and self.current_entry == old_name:
+                entry_uuid = self._entry_uuid_from_item(item)
+                self.manager.rename_entry(entry_uuid, new_text)
+                # Update local state if this was the displayed entry.
+                if hasattr(self, 'current_entry') and self.current_entry == current_text:
                     self.current_entry = new_text
                     self.entry_name_label.setText(new_text)
             else:
-                # Rename the category in the canonical list.
-                for cat in self.compendium_data["categories"]:
-                    if cat.get("name") == current_text:
-                        cat["name"] = new_text
-                        break
-                item.setText(0, new_text)
-            self.save_compendium_to_file()
-            if item_type == "entry":
-                self.update_relation_combo()
+                category_uuid = self._category_uuid_from_item(item)
+                self.manager.rename_category(category_uuid, new_text)
+            # Tree is rebuilt by the event bus.
 
     def move_item(self, item, direction):
         """Move an entry up or down within its category."""
         parent = item.parent() or self.tree.invisibleRootItem()
         index = parent.indexOfChild(item)
+        moved = False
         if direction == "up" and index > 0:
             parent.takeChild(index)
             parent.insertChild(index - 1, item)
             self.tree.setCurrentItem(item)
-            self.update_category_data(parent)
+            moved = True
         elif direction == "down" and index < parent.childCount() - 1:
             parent.takeChild(index)
             parent.insertChild(index + 1, item)
             self.tree.setCurrentItem(item)
+            moved = True
+        if moved:
             self.update_category_data(parent)
-        self.save_compendium_to_file()
 
     def update_category_data(self, parent):
-        """Sync categories[].entries[] order to match the current tree widget order."""
-        category_name = parent.text(0) if parent != self.tree.invisibleRootItem() else None
-        if category_name:
-            for cat in self.compendium_data["categories"]:
-                if cat.get("name") == category_name:
-                    new_entries = []
-                    for i in range(parent.childCount()):
-                        item = parent.child(i)
-                        for entry in cat.get("entries", []):
-                            if entry.get("name") == item.text(0):
-                                new_entries.append(entry)
-                                break
-                    cat["entries"] = new_entries
-                    break
+        """Persist the entry order of *parent*'s category to match the current tree order."""
+        if parent != self.tree.invisibleRootItem():
+            category_uuid = self._category_uuid_from_item(parent)
+            if category_uuid:
+                ordered_uuids = [parent.child(i).data(2, Qt.UserRole) for i in range(parent.childCount())]
+                self.manager.reorder_entries(category_uuid, ordered_uuids)
+                # Tree is rebuilt by the event bus.
 
     def move_entry(self, entry_item):
         """Move an entry to a different category via context menu."""
+        # If we have unsaved changes and the user cancels the save prompt, abort the move.
+        if not self.maybe_commit_unsaved_changes():
+            return
+
         from PyQt5.QtGui import QCursor
         menu = QMenu(self)
+        menu.setStyleSheet(ThemeManager.get_menu_stylesheet())
         root = self.tree.invisibleRootItem()
         for i in range(root.childCount()):
             cat_item = root.child(i)
@@ -823,39 +855,22 @@ class EnhancedCompendiumWindow(QMainWindow):
         if selected_action is not None:
             target_category = selected_action.data()
             if target_category is not None:
-                current_parent = entry_item.parent()
-                if current_parent is not None:
-                    current_parent.removeChild(entry_item)
-                    # Remove from the old category's canonical list, capturing the full entry dict.
-                    entry_uuid = entry_item.data(2, Qt.UserRole)
-                    entry_dict = None
-                    for cat in self.compendium_data["categories"]:
-                        if cat.get("name") == current_parent.text(0):
-                            for e in cat.get("entries", []):
-                                if e.get("uuid") == entry_uuid or e.get("name") == entry_item.text(0):
-                                    entry_dict = e
-                                    break
-                            cat["entries"] = [e for e in cat.get("entries", []) if e is not entry_dict]
-                            break
-                    if entry_dict is None:
-                        # Fallback: reconstruct a minimal unified entry via the manager factory.
-                        entry_dict = self.manager.make_empty_entry(
-                            entry_item.text(0),
-                            entry_item.data(1, Qt.UserRole) or "",
-                        )
-                        entry_dict["uuid"] = entry_uuid
-                # Add to the new category's canonical list (with all unified fields preserved).
-                for cat in self.compendium_data["categories"]:
-                    if cat.get("name") == target_category.text(0):
-                        cat["entries"].append(entry_dict)
-                        break
-                target_category.addChild(entry_item)
-                target_category.setExpanded(True)
-                self.tree.setCurrentItem(entry_item)
-                self.save_compendium_to_file()
+                entry_uuid = entry_item.data(2, Qt.UserRole)
+                target_category_uuid = self._category_uuid_from_item(target_category)
+                moved = self.manager.move_entry(entry_uuid, target_category_uuid)
+                if moved:
+                    # Force local refresh from disk so this window stays in sync even
+                    # if event delivery/order is delayed.
+                    self.populate_compendium()
+                    self._find_and_select_entry_by_uuid(entry_uuid)
 
     def on_item_changed(self, current, previous):
         """Handle tree item selection changes with a Save/Discard/Cancel guard when dirty."""
+        # Clear any previous cancelled marker at the start of a new selection
+        # change cycle. This ensures the marker only applies to the immediate
+        # mouse event that caused the cancellation.
+        self._last_selection_cancelled = False
+
         if (
             previous is not None
             and previous.data(0, Qt.UserRole) == "entry"
@@ -875,20 +890,87 @@ class EnhancedCompendiumWindow(QMainWindow):
             elif choice == QMessageBox.Discard:
                 self._discard_current_entry_changes(reload_entry=False)
             else:
-                # Cancel: revert the tree selection back to the dirty entry.
-                self.tree.blockSignals(True)
-                self.tree.setCurrentItem(previous)
-                self.tree.blockSignals(False)
+                # Cancel: schedule a restore of the tree selection back to the
+                # dirty entry and mark that the selection was cancelled.
+                #
+                # Rationale: Qt emits selection-change signals and also delivers
+                # mouse/context-menu events in response to the same user
+                # interaction. If we immediately call setCurrentItem() here it
+                # can race with other handlers that are still processing the
+                # original mouse event (for example the context-menu request
+                # or a move action started from a right-click). Those other
+                # handlers may have already observed the new selection and
+                # proceeded with their own actions.
+                #
+                # To avoid that race we schedule the restore using
+                # QTimer.singleShot(0, ...). That defers the re-selection to
+                # the end of the current event loop iteration so all existing
+                # event handlers for the original click run first. The helper
+                # then re-applies the previous selection while blocking
+                # signals, and clears the cancelled marker so subsequent
+                # independent events behave normally.
+                #
+                # This is a pragmatic, widely-used approach for ordering fixes
+                # in Qt when you need to undo a transient state caused by the
+                # same user event. Alternatives (event filters, intercepting
+                # mousePressEvent) are more invasive and error-prone in a
+                # complex widget hierarchy.
+                self._last_selection_cancelled = True
+                QTimer.singleShot(0, lambda prev=previous: self._restore_previous_selection(prev))
                 return
 
+        # Normal selection handling (when not cancelled): load or clear UI
         if current is None:
             self.clear_entry_ui()
             return
-        item_type = current.data(0, Qt.UserRole)
-        if item_type == "entry":
+
+        # The tree can be rebuilt by save/discard flows while handling the same
+        # selection-change signal, which may invalidate the original *current* item.
+        try:
+            current_type = current.data(0, Qt.UserRole)
+        except RuntimeError:
+            self.clear_entry_ui()
+            return
+
+        if current_type == "entry":
             self.load_entry(current.text(0), current)
         else:
             self.clear_entry_ui()
+
+    def _restore_previous_selection(self, previous):
+        """Restore the tree selection to *previous* while blocking signals.
+
+        This helper is invoked via singleShot to ensure the restore happens
+        after other event handlers triggered by the same user action.
+
+        Details:
+        - The restore is performed with signals blocked so the re-selection
+          itself does not re-trigger the unsaved-changes guard or other
+          selection-change handlers.
+        - After restoring we clear :attr:`_last_selection_cancelled` so the
+          cancelled-state only applies to the originating user event.
+
+        Alternatives considered but rejected:
+        - Installing an event filter to intercept and veto selection changes
+          at the mouse-press level. This would be lower-level but requires
+          careful handling of all mouse, keyboard, and focus edge-cases in
+          the tree; it also complicates unit testing.
+        - Immediately setting the current item (without deferral). This can
+          race with other handlers that run for the same mouse event and may
+          leave the UI in a partially-updated state.
+        """
+        try:
+            self.tree.blockSignals(True)
+            # Only restore if the previous item is still valid.
+            if previous is not None:
+                self.tree.setCurrentItem(previous)
+        finally:
+            self.tree.blockSignals(False)
+            # Consume the cancelled marker so subsequent independent events are
+            # not affected.
+            self._last_selection_cancelled = False
+
+        
 
     def load_entry(self, entry_name, entry_item):
         """
@@ -900,7 +982,12 @@ class EnhancedCompendiumWindow(QMainWindow):
             entry_name (str): Name of the entry
             entry_item: The QTreeWidgetItem for this entry
         """
-        if hasattr(self, 'current_entry') and hasattr(self, 'current_entry_item') and self.is_dirty():
+        if (
+            hasattr(self, 'current_entry')
+            and hasattr(self, 'current_entry_item')
+            and self.is_dirty()
+            and not self._suppress_unsaved_prompt
+        ):
             self.save_current_entry()
         self.current_entry = entry_name
         self.current_entry_item = entry_item
@@ -1024,7 +1111,6 @@ class EnhancedCompendiumWindow(QMainWindow):
         for cat in self.compendium_data.get("categories", []):
             for entry in cat.get("entries", []):
                 entries.append(entry.get("name", ""))
-        entries.sort()
         self.relationship_combo.addItems(entries)
 
     def add_tag(self):
@@ -1061,6 +1147,7 @@ class EnhancedCompendiumWindow(QMainWindow):
         item = self.tags_list.itemAt(pos)
         if item:
             menu = QMenu(self)
+            menu.setStyleSheet(ThemeManager.get_menu_stylesheet())
             menu.addAction(_("Remove Tag"), lambda: self.remove_tag(item))
             menu.addAction(_("Move Up"), lambda: self.move_tag(item, "up"))
             menu.addAction(_("Move Down"), lambda: self.move_tag(item, "down"))
@@ -1100,6 +1187,7 @@ class EnhancedCompendiumWindow(QMainWindow):
         item = self.relationships_list.itemAt(pos)
         if item:
             menu = QMenu(self)
+            menu.setStyleSheet(ThemeManager.get_menu_stylesheet())
             menu.addAction(_("Remove Relationship"), lambda: self.remove_relationship(item))
             menu.exec_(self.relationships_list.viewport().mapToGlobal(pos))
 
@@ -1156,18 +1244,16 @@ class EnhancedCompendiumWindow(QMainWindow):
 
     def filter_tree(self):
         """Filter tree items by entry name or tag name matching the search bar text."""
-        search_text = self.search_bar.text().lower()
+        search_text = self.search_bar.text()
+        # One manager call loads all matching entries; avoids per-item disk reads.
+        matching_uuids = set(self.manager.find_entries(search_text).keys())
         for i in range(self.tree.topLevelItemCount()):
             cat_item = self.tree.topLevelItem(i)
             cat_visible = False
             for j in range(cat_item.childCount()):
                 entry_item = cat_item.child(j)
-                entry_name = entry_item.text(0).lower()
-                entry_uuid = self._entry_uuid_from_item(entry_item)
-                entry_data = self._find_entry_in_data(entry_uuid) or {}
-                entry_tags = entry_data.get("tags", [])
-                tag_names = [tag.get("name", "").lower() if isinstance(tag, dict) else tag.lower() for tag in entry_tags]
-                entry_visible = search_text in entry_name or any(search_text in tag for tag in tag_names)
+                entry_uuid = entry_item.data(2, Qt.UserRole)
+                entry_visible = not search_text or entry_uuid in matching_uuids
                 entry_item.setHidden(not entry_visible)
                 if entry_visible:
                     cat_visible = True

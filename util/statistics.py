@@ -60,7 +60,6 @@ class ProjectStatistics:
 
         # Initialize all attributes to prevent AttributeError
         self.compendium_manager = None
-        self.compendium_data = {}
         self.scene_contents = {}
         self.scene_metadata = {}
         self.word_counts = {}
@@ -88,10 +87,8 @@ class ProjectStatistics:
             self.logger.error(f"ERROR: Cannot list files in '{self.project_path}': {e!s}")
             return False
 
-        # Load compendium data
+        # Load compendium data via the manager
         self.compendium_manager = CompendiumManager(self.project_name)
-        self.compendium_data = self.compendium_manager.load_data()
-
         # Updated: Look for HTML files, excluding those ending with Summary_<timestamp>.html
         scene_files = [
             f for f in os.listdir(self.project_path)
@@ -261,40 +258,24 @@ class ProjectStatistics:
         # Lazy import to avoid circular import issues:
         from .text_analysis import comprehensive_analysis
 
-        # Extract categories from compendium if available
+        # Extract categories from compendium via the manager (no raw format knowledge needed)
         characters = {}
         locations = {}
         custom_categories = {}
 
-        if self.compendium_data:
-            categories = self.compendium_data.get("categories", [])
-            for cat in categories:
-                category_name = cat.get("name", "")
-                entries = cat.get("entries", [])
-                # Normalize entries to dict {name: data}
-                if isinstance(entries, list):
-                    entry_dict = {}
-                    for e in entries:
-                        if isinstance(e, str):
-                            entry_dict[e] = None
-                        elif isinstance(e, dict):
-                            name = e.get("name", "")
-                            if name:
-                                entry_dict[name] = e
-                    entries = entry_dict
-                elif isinstance(entries, dict):
-                    pass  # already dict
-                else:
-                    continue
-
+        if self.compendium_manager:
+            for cat_info in self.compendium_manager.list_categories():
+                category_name = cat_info["name"]
+                entries = self.compendium_manager.list_entries(category_name)
+                # Build a {name: entry_dict} map for fast lookup
+                entry_dict = {e.get("name", ""): e for e in entries if e.get("name")}
                 lower_name = category_name.lower()
                 if lower_name == "characters":
-                    characters = entries
+                    characters = entry_dict
                 elif lower_name == "locations":
-                    locations = entries
+                    locations = entry_dict
                 else:
-                    custom_categories[category_name] = entries
-
+                    custom_categories[category_name] = entry_dict
         # Process each scene
         for scene_id, content in self.scene_contents.items():
             # Run text analysis
@@ -607,7 +588,7 @@ class ProjectStatistics:
         Returns:
             dict: Compendium usage statistics
         """
-        if not self.compendium_data:
+        if not self.compendium_manager:
             return {
                 'usage_by_category': {},
                 'unused_entries': {},
@@ -616,41 +597,22 @@ class ProjectStatistics:
 
         usage_by_category = {}
         unused_entries = {}
-
-        # Process each category in the compendium data
-        categories = self.compendium_data.get("categories", [])
-        for cat in categories:
-            category_name = cat.get("name", "")
-            entries = cat.get("entries", [])
+        
+        for cat_info in self.compendium_manager.list_categories():
+            category_name = cat_info["name"]
+            entries = self.compendium_manager.list_entries(category_name)
+            total_entries = len(entries)
             used_entries = 0
             unused = []
-            total_entries = 0
 
-            if isinstance(entries, list):
-                total_entries = len(entries)
-                for entry in entries:
-                    if isinstance(entry, str):
-                        entry_name = entry
-                    elif isinstance(entry, dict):
-                        entry_name = entry.get("name", "Unknown")
-                    else:
-                        continue
-                    if not entry_name or entry_name == "Unknown":
-                        continue
-                    is_used = self._is_entry_used(category_name, entry_name)
-                    if is_used:
-                        used_entries += 1
-                    else:
-                        unused.append(entry_name)
-            elif isinstance(entries, dict):
-                total_entries = len(entries)
-                for entry_name, entry_data in entries.items():
-                    is_used = self._is_entry_used(category_name, entry_name)
-                    if is_used:
-                        used_entries += 1
-                    else:
-                        unused.append(entry_name)
-
+            for entry in entries:
+                entry_name = entry.get("name", "")
+                if not entry_name:
+                    continue
+                if self._is_entry_used(category_name, entry_name):
+                    used_entries += 1
+                else:
+                    unused.append(entry_name)
             usage_percent = (used_entries / total_entries * 100) if total_entries > 0 else 0
             usage_by_category[category_name] = {
                 'total': total_entries,
@@ -661,34 +623,16 @@ class ProjectStatistics:
             if unused:
                 unused_entries[category_name] = unused
 
-        # Placeholder for orphaned references (not implemented yet)
-        orphaned_references = []
-
         return {
             'usage_by_category': usage_by_category,
             'unused_entries': unused_entries,
-            'orphaned_references': orphaned_references
+            'orphaned_references': []
         }
 
     def get_compendium_entries(self, category):
-        categories = self.compendium_data.get("categories", [])
-        for cat in categories:
-            if cat.get("name", "").lower() == category.lower():
-                entries = cat.get("entries", [])
-                names = []
-                if isinstance(entries, list):
-                    for e in entries:
-                        if isinstance(e, str):
-                            names.append(e)
-                        elif isinstance(e, dict):
-                            name = e.get("name")
-                            if name:
-                                names.append(name)
-                elif isinstance(entries, dict):
-                    names = list(entries.keys())
-                return names
-        return []
-
+        """Return entry names for *category* via the manager."""
+        return [e.get("name", "") for e in self.compendium_manager.list_entries(category) if e.get("name")]
+    
 class StatisticsChart(QChartView):
     """
     Custom chart view for displaying statistics charts.

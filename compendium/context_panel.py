@@ -110,26 +110,24 @@ class ContextPanel(QWidget):
         """Build a tree from the compendium data and restore selections."""
         self._building_tree = True
         self.compendium_tree.clear()
-        data = self.compendium_manager.load_data()
 
-        categories = data.get("categories", [])
-        if isinstance(categories, dict):
-            new_categories = [{"name": cat, "entries": entries} for cat, entries in categories.items()]
-            categories = new_categories
-
-        for cat in categories:
-            cat_name = cat.get("name", "Unnamed Category")
-            entries = cat.get("entries", [])
+        for cat_info in self.compendium_manager.list_categories():
+            cat_name = cat_info["name"]
+            cat_uuid = cat_info["uuid"]
+            entries = self.compendium_manager.list_entries(cat_uuid)
             cat_item = QTreeWidgetItem(self.compendium_tree, [cat_name])
             cat_item.setFlags(cat_item.flags() & ~Qt.ItemIsUserCheckable)
-            for entry in sorted(entries, key=lambda e: e.get("name", "")):
+            # Preserve canonical entry order from categories[].entries[]; do not
+            # force alphabetical ordering here.
+            for entry in entries:
                 entry_name = entry.get("name", "Unnamed Entry")
+                entry_uuid = entry.get("uuid", "")
                 entry_item = QTreeWidgetItem(cat_item, [entry_name])
                 entry_item.setFlags(entry_item.flags() | Qt.ItemIsUserCheckable)
                 item_path = f"{cat_name}/{entry_name}"
                 entry_item.setCheckState(0, Qt.Checked if self.selection_manager.is_checked(item_path) else Qt.Unchecked)
                 entry_item.setData(
-                    0, Qt.UserRole, {"type": "compendium", "category": cat_name, "label": entry_name}
+                    0, Qt.UserRole, {"type": "compendium", "category": cat_name, "label": entry_name, "entry_uuid": entry_uuid}
                 )
         self.compendium_tree.expandAll()
         self._building_tree = False
@@ -222,7 +220,10 @@ class ContextPanel(QWidget):
             for j in range(cat_item.childCount()):
                 entry_item = cat_item.child(j)
                 if entry_item.checkState(0) == Qt.Checked:
-                    text = self.compendium_manager.get_text(category, entry_item.text(0))
+                    item_data = entry_item.data(0, Qt.UserRole) or {}
+                    entry_uuid = item_data.get("entry_uuid")
+                    entry = self.compendium_manager.get_entry_by_uuid(entry_uuid) if entry_uuid else None
+                    text = entry.get("content", "") if entry else f"[No content for {entry_item.text(0)} in category {category}]"
                     texts.append(f"[Compendium Entry - {category} - {entry_item.text(0)}]:\n{text}")
         return "\n\n".join(texts) if texts else ""
 

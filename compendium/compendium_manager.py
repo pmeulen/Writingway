@@ -78,7 +78,10 @@ class CompendiumEventBus:
 
 
 class CompendiumManager:
-    """Manages compendium data loading, retrieval, and reference parsing for a project."""
+    """
+    Manages compendium data loading, retrieval, updating and reference parsing for a
+    project's compendium.
+    """
 
     # ------------------------------------------------------------------
     # Canonical structure factories
@@ -148,7 +151,8 @@ class CompendiumManager:
                 "version": 3,
                 "categories": [self.make_empty_category("Characters")],
             }
-            self._save_data(default_data)
+            # Startup bootstrap should not broadcast update events.
+            self._save_data(default_data, notify=False)
 
     def _backup_compendium_data(self) -> str:
         """Create a filesystem backup copy of the current compendium file.
@@ -182,6 +186,8 @@ class CompendiumManager:
     def _load_data(self) -> dict[str, Any]:
         """
         Load compendium data from the project-specific file, converting legacy formats if needed.
+        Warns the user when loading a file with a newer version than the code supports,
+        but still attempts to load it with all conversion logic disabled.
 
         Returns:
             dict: Compendium data with a 'categories' key containing a list of category objects.
@@ -240,9 +246,9 @@ class CompendiumManager:
             # Don't attempt convert the data, since we don't know the format. Return as-is.
             return False
 
-        # Ensure essential keys exist
-        if not data["categories"]:
-            data["categories"] = [  ]
+        # Ensure essential keys exist with a stable shape.
+        if "categories" not in data or data["categories"] is None:
+            data["categories"] = []
             changed = True
 
         # Convert legacy dict format to list of categories
@@ -297,6 +303,7 @@ class CompendiumManager:
                     print(f"UUID {uuid} is already used by another compendium entry. Assigning UUID {new_uuid}")
                     entry["uuid"] = new_uuid
                     changed = True
+                seen_uuids.add(entry.get("uuid"))
 
                 # If entry has no name, give it an unique name
                 name: str = entry.get("name", "")
@@ -338,7 +345,8 @@ class CompendiumManager:
             # the conversion code
             backup_name = self._backup_compendium_data()
             print(f"Backed up compendium data to {backup_name}")
-            compendium_name = self._save_data(data)
+            # Internal migration/normalization writes should not re-enter UI listeners.
+            compendium_name = self._save_data(data, notify=False)
             print(f"Saved compendium data to {compendium_name}")
 
         return data
@@ -346,7 +354,7 @@ class CompendiumManager:
     def load_data(self) -> dict[str, Any]:
         return self._load_data()
 
-    def _save_data(self, compendium_data: dict[str, Any]) -> str:
+    def _save_data(self, compendium_data: dict[str, Any], notify: bool = True) -> str:
         """
         Save compendium data to the file.
         Return filename
@@ -358,49 +366,13 @@ class CompendiumManager:
             os.makedirs(os.path.dirname(self._filepath), exist_ok=True)
             with open(self._filepath, "w", encoding="utf-8") as f:
                 json.dump(compendium_data, f, indent=2)
-            if self.event_bus:
+            if notify and self.event_bus:
                 self.event_bus.notify_updated(self.project_name)
         except Exception as e:
             print(f"Error saving compendium data to {self._filepath}: {e}")
 
         return self._filepath
 
-    def save_data(self, compendium_data: dict[str, Any]) -> None:
-        self._save_data(compendium_data)
-
-    def get_category(self, category: str) -> list[dict[str, str]]:
-        data = self._load_data()
-        categories = data.get("categories", [])
-        for cat in categories:
-            if cat.get("name") == category:
-                return cat.get("entries", [])
-        return []
-
-    def get_characters(self) -> list[str]:
-        character_dicts = self.get_category("Characters")
-        characters = [d['name'] for d in character_dicts]
-        characters.sort()
-        return characters
-
-    def get_text(self, category: str, entry: str) -> str:
-        """
-        Retrieve the text content for a given category and entry.
-
-        Args:
-            category (str): The category name.
-            entry (str): The entry name within the category.
-
-        Returns:
-            str: The content of the entry, or a placeholder if not found.
-        """
-        data = self._load_data()
-        categories = data.get("categories", [])
-        for cat in categories:
-            if cat.get("name") == category:
-                for e in cat.get("entries", []):
-                    if e.get("name") == entry:
-                        return e.get("content", f"[No content for {entry} in category {category}]")
-        return f"[No content for {entry} in category {category}]"
 
     def parse_references(self, message: str) -> list[str]:
         """
@@ -483,3 +455,326 @@ class CompendiumManager:
                 existing_data["categories"].append(new_cat)
 
         self._save_data(existing_data)
+
+    # ------------------------------------------------------------------
+    # Query methods
+    # ------------------------------------------------------------------
+
+    def list_categories(self) -> List[Dict[str, str]]:
+        """Return a summary list of all categories.
+
+        Returns:
+            list of ``{"name": str, "uuid": str}`` dicts (in display order).
+        """
+        data = self._load_data()
+        return [{"name": cat.get("name", ""), "uuid": cat.get("uuid", "")}
+                for cat in data.get("categories", [])]
+
+    def get_category_by_uuid(self, category_uuid: str) -> Optional[Dict[str, Any]]:
+        """Return the full category dict (including its ``entries`` list) for *category_uuid*.
+
+        Returns:
+            The category dict, or ``None`` if not found.
+        """
+        data = self._load_data()
+        for cat in data.get("categories", []):
+            if cat.get("uuid") == category_uuid:
+                return cat
+        return None
+
+    def list_entries(self, category_uuid: str) -> List[Dict[str, Any]]:
+        """Return all entry dicts for the category identified by *category_uuid*.
+
+        Returns:
+            List of entry dicts, or an empty list if the category is not found.
+        """
+        cat = self.get_category_by_uuid(category_uuid)
+        return cat.get("entries", []) if cat else []
+
+    def get_entry_by_uuid(self, entry_uuid: str) -> Optional[Dict[str, Any]]:
+        """Return the entry dict whose ``uuid`` matches *entry_uuid*, or ``None``."""
+        data = self._load_data()
+        for cat in data.get("categories", []):
+            for entry in cat.get("entries", []):
+                if entry.get("uuid") == entry_uuid:
+                    return entry
+        return None
+
+    def find_categories(self, search_text: str = "") -> Dict[str, Dict[str, Any]]:
+        """Return categories whose name contains *search_text*, keyed by UUID.
+
+        An empty *search_text* returns every category.  Each value is a summary
+        dict ``{"name": str, "uuid": str}`` — **not** the full category with entries.
+
+        Returns:
+            ``{category_uuid: {"name": str, "uuid": str}, ...}``
+        """
+        lower = search_text.lower()
+        data = self._load_data()
+        results: Dict[str, Dict[str, Any]] = {}
+        for cat in data.get("categories", []):
+            cat_name = cat.get("name", "")
+            if not lower or lower in cat_name.lower():
+                uuid = cat.get("uuid", "")
+                results[uuid] = {"name": cat_name, "uuid": uuid}
+        return results
+
+    def find_entries(self, search_text: str = "") -> Dict[str, Dict[str, Any]]:
+        """Return entries whose name or tag names contain *search_text*, keyed by UUID.
+
+        An empty *search_text* returns every entry.  Each value contains all
+        standard entry fields plus a ``"category_uuid"`` key and a ``"category_name"``
+        key for the containing category.
+
+        Returns:
+            ``{entry_uuid: {entry fields, "category_uuid": str, "category_name": str}, ...}``
+        """
+        lower = search_text.lower()
+        data = self._load_data()
+        results: Dict[str, Dict[str, Any]] = {}
+        for cat in data.get("categories", []):
+            cat_name = cat.get("name", "")
+            cat_uuid = cat.get("uuid", "")
+            for entry in cat.get("entries", []):
+                entry_name = entry.get("name", "").lower()
+                tag_names = [
+                    (t.get("name", "") if isinstance(t, dict) else t).lower()
+                    for t in entry.get("tags", [])
+                ]
+                if not lower or lower in entry_name or any(lower in t for t in tag_names):
+                    entry_uuid = entry.get("uuid", "")
+                    results[entry_uuid] = {"category_uuid": cat_uuid, "category_name": cat_name, **entry}
+        return results
+
+    def get_summary_for_prompt(self) -> str:
+        """Return a compact, LLM-friendly JSON summary of the compendium.
+
+        Only category name, entry name, and entry content are included —
+        no UUIDs, images, tags, or relationships — to keep the token
+        footprint small.
+
+        Returns:
+            JSON string: ``{"categories": [{"name", "entries": [{"name", "content"}]}]}``
+        """
+        data = self._load_data()
+        summary = {
+            "categories": [
+                {
+                    "name": cat.get("name", ""),
+                    "entries": [
+                        {"name": e.get("name", ""), "content": e.get("content", "")}
+                        for e in cat.get("entries", [])
+                    ],
+                }
+                for cat in data.get("categories", [])
+            ]
+        }
+        return json.dumps(summary, indent=2)
+
+    # ------------------------------------------------------------------
+    # Mutation (CRUD) methods
+    # Targeted entities are always referenced by UUID for delete, move,
+    # rename, and update operations.  Only ``add_*`` methods use names
+    # (because the object does not yet have a UUID).
+    # Each method loads current data, applies one atomic change, and
+    # saves back.  Callers never need to see the raw data structure.
+    # ------------------------------------------------------------------
+
+    # --- Categories ---
+
+    def add_category(self, name: str) -> Dict[str, Any]:
+        """Create and persist a new category.
+
+        Returns:
+            The newly created category dict (includes its generated ``uuid``).
+        """
+        data = self._load_data()
+        new_cat = self.make_empty_category(name)
+        data["categories"].append(new_cat)
+        self._save_data(data)
+        return new_cat
+
+    def rename_category(self, category_uuid: str, new_name: str) -> bool:
+        """Rename the category identified by *category_uuid*.
+
+        Returns:
+            ``True`` if found and renamed, ``False`` otherwise.
+        """
+        data = self._load_data()
+        for cat in data.get("categories", []):
+            if cat.get("uuid") == category_uuid:
+                cat["name"] = new_name
+                self._save_data(data)
+                return True
+        return False
+
+    def remove_category(self, category_uuid: str) -> bool:
+        """Remove the category identified by *category_uuid* and all its entries.
+
+        Returns:
+            ``True`` if found and removed, ``False`` otherwise.
+        """
+        data = self._load_data()
+        before = len(data.get("categories", []))
+        data["categories"] = [c for c in data.get("categories", []) if c.get("uuid") != category_uuid]
+        if len(data["categories"]) == before:
+            return False
+        self._save_data(data)
+        return True
+
+    # --- Entries ---
+
+    def add_entry(self, category_uuid: str, name: str, content: str = "") -> Optional[Dict[str, Any]]:
+        """Add a new entry to the category identified by *category_uuid*.
+
+        Returns:
+            The new entry dict (includes its generated ``uuid``), or ``None`` if
+            *category_uuid* was not found.
+        """
+        data = self._load_data()
+        for cat in data.get("categories", []):
+            if cat.get("uuid") == category_uuid:
+                new_entry = self.make_empty_entry(name, content)
+                cat["entries"].append(new_entry)
+                self._save_data(data)
+                return new_entry
+        return None
+
+    def rename_entry(self, entry_uuid: str, new_name: str) -> bool:
+        """Rename the entry identified by *entry_uuid*.
+
+        Returns:
+            ``True`` if found and renamed, ``False`` otherwise.
+        """
+        data = self._load_data()
+        for cat in data.get("categories", []):
+            for entry in cat.get("entries", []):
+                if entry.get("uuid") == entry_uuid:
+                    entry["name"] = new_name
+                    self._save_data(data)
+                    return True
+        return False
+
+    def update_entry(self, entry_uuid: str, fields: Dict[str, Any]) -> bool:
+        """Merge *fields* into the entry identified by *entry_uuid*.
+
+        The ``uuid`` field is protected and cannot be changed via this method.
+        All existing fields not present in *fields* are preserved.
+
+        Returns:
+            ``True`` if the entry was found and updated, ``False`` otherwise.
+        """
+        safe_fields = {k: v for k, v in fields.items() if k != "uuid"}
+        data = self._load_data()
+        for cat in data.get("categories", []):
+            for entry in cat.get("entries", []):
+                if entry.get("uuid") == entry_uuid:
+                    entry.update(safe_fields)
+                    self._save_data(data)
+                    return True
+        return False
+
+    def remove_entry(self, entry_uuid: str) -> bool:
+        """Remove the entry identified by *entry_uuid*.
+
+        Returns:
+            ``True`` if removed, ``False`` if not found.
+        """
+        data = self._load_data()
+        for cat in data.get("categories", []):
+            before = len(cat.get("entries", []))
+            cat["entries"] = [e for e in cat.get("entries", []) if e.get("uuid") != entry_uuid]
+            if len(cat["entries"]) < before:
+                self._save_data(data)
+                return True
+        return False
+
+    def move_entry(self, entry_uuid: str, target_category_uuid: str) -> bool:
+        """Move the entry identified by *entry_uuid* to the category identified by
+        *target_category_uuid*.
+
+        Returns:
+            ``True`` on success, ``False`` if the entry or target category was not found.
+        """
+        data = self._load_data()
+        entry_dict = None
+        for cat in data.get("categories", []):
+            for e in cat.get("entries", []):
+                if e.get("uuid") == entry_uuid:
+                    entry_dict = e
+                    break
+            if entry_dict is not None:
+                cat["entries"] = [e for e in cat.get("entries", []) if e.get("uuid") != entry_uuid]
+                break
+        if entry_dict is None:
+            return False
+        for cat in data.get("categories", []):
+            if cat.get("uuid") == target_category_uuid:
+                cat["entries"].append(entry_dict)
+                self._save_data(data)
+                return True
+        return False
+
+    def reorder_entries(self, category_uuid: str, ordered_uuids: List[str]) -> bool:
+        """Reorder the entries of the category identified by *category_uuid* to match
+        *ordered_uuids*.
+
+        Entries whose UUID is absent from *ordered_uuids* are appended at the end in
+        their original relative order.
+
+        Returns:
+            ``True`` if the category was found, ``False`` otherwise.
+        """
+        data = self._load_data()
+        for cat in data.get("categories", []):
+            if cat.get("uuid") == category_uuid:
+                uuid_to_entry = {e.get("uuid"): e for e in cat.get("entries", [])}
+                ordered = [uuid_to_entry[u] for u in ordered_uuids if u in uuid_to_entry]
+                ordered_set = set(ordered_uuids)
+                remaining = [e for e in cat.get("entries", []) if e.get("uuid") not in ordered_set]
+                cat["entries"] = ordered + remaining
+                self._save_data(data)
+                return True
+        return False
+
+    # ------------------------------------------------------------------
+    # Legacy / convenience helpers
+    # These name-based methods are kept for backward compatibility while
+    # callers in other modules are updated to use UUID-based APIs.
+    # ------------------------------------------------------------------
+
+    def get_category(self, category_name: str) -> List[Dict[str, str]]:
+        """[Legacy] Return entries for the first category whose name matches *category_name*.
+
+        Prefer ``list_entries(category_uuid)`` for new code.
+        """
+        data = self._load_data()
+        for cat in data.get("categories", []):
+            if cat.get("name") == category_name:
+                return cat.get("entries", [])
+        return []
+
+    def get_characters(self) -> List[str]:
+        """[Legacy] Return a list of character names from the 'Characters' category.
+
+        NOTE: This returns names in the canonical order stored in the compendium
+        (categories[].entries[]) rather than enforcing an alphabetical sort. Callers
+        that depend on an alphabetically-sorted list should explicitly sort the
+        result.
+        """
+        character_dicts = self.get_category("Characters")
+        return [d['name'] for d in character_dicts]
+
+    def get_text(self, category: str, entry: str) -> str:
+        """[Legacy] Retrieve entry content by category name and entry name.
+
+        Prefer ``get_entry_by_uuid`` for new code.
+        """
+        data = self._load_data()
+        for cat in data.get("categories", []):
+            if cat.get("name") == category:
+                for e in cat.get("entries", []):
+                    if e.get("name") == entry:
+                        return e.get("content", f"[No content for {entry} in category {category}]")
+        return f"[No content for {entry} in category {category}]"
+
