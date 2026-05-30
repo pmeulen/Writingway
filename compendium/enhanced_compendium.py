@@ -45,25 +45,6 @@ from settings.theme_manager import ThemeManager
 
 DEBUG = False
 
-
-# ---------------------------------------------------------------------------
-# Data model
-# ---------------------------------------------------------------------------
-# Compendium data is stored in <project>/compendium.json with two sections:
-#
-#   "categories": [ { "name": str, "entries": [ { "name", "content", "uuid" } ] } ]
-#       The canonical entry list.  Every part of the app (project compendium
-#       panel, POV selector, AI context, etc.) reads from here.
-#
-#   "extensions": { "entries": { <uuid>: { "details", "tags",
-#                                          "relationships", "images" } } }
-#       Extra per-entry data used only by the Enhanced Compendium (private
-#       notes, tags, relationships, images).  Keyed by entry uuid.
-#
-# Rule: an entry MUST exist in categories[].entries[] to be visible to the
-# rest of the app.  The extensions record is supplementary.
-# ---------------------------------------------------------------------------
-
 class EnhancedCompendiumWindow(QMainWindow):
     """
     Enhanced Compendium Window - A comprehensive interface for managing compendium data
@@ -311,7 +292,14 @@ class EnhancedCompendiumWindow(QMainWindow):
         except TypeError:
             pass
         self.project_combo.currentTextChanged.connect(self.on_project_combo_changed)
+
+        # Ensure our internal project_name matches the combo's selected project and
+        # load that project's compendium so the UI reflects the selected project.
+        self.project_name = self.project_combo.currentText()
         self.setWindowTitle(_("Enhanced Compendium - {}").format(self.project_name))
+        # Load the compendium for the selected project so entries (e.g. Characters/Alice)
+        # are shown immediately after the window is created.
+        self.change_project(self.project_name, select_default_item=True)
 
     def on_project_combo_changed(self, new_project):
         """Update the project and reload the compendium when a different project is selected."""
@@ -406,13 +394,13 @@ class EnhancedCompendiumWindow(QMainWindow):
         self.tabs.addTab(self.overview_tab, _("Overview"))
         self.tabs.setTabToolTip(0, _("this is the text the AI can see if you select this entry to be included in the prompt inside the context panel"))
 
-        # Details tab - stored in extensions only; never sent to the AI.
+        # Details tab - enhanced-only; never sent to the AI.
         self.details_editor = QTextEdit()
         self.details_editor.setPlaceholderText(_("Enter details about your entry here... (details about your entry the AI can't see - this info is only for you)"))
         self.tabs.addTab(self.details_editor, _("Details"))
         self.tabs.setTabToolTip(1, _("details about your entry the AI can't see - this info is only for you"))
 
-        # Relationships tab - stored in extensions only.
+        # Relationships tab - enhanced-only.
         self.relationships_tab = QWidget()
         relationships_layout = QVBoxLayout(self.relationships_tab)
         self.relationships_form = QGroupBox(_("Relationships"))
@@ -430,7 +418,7 @@ class EnhancedCompendiumWindow(QMainWindow):
         relationships_layout.addWidget(self.relationships_list)
         self.tabs.addTab(self.relationships_tab, _("Relationships"))
 
-        # Images tab - stored in extensions only.
+        # Images tab - enhanced-only.
         self.images_tab = QTabWidget()
         self.image_scroll = QScrollArea()
         self.image_scroll.setWidgetResizable(True)
@@ -503,48 +491,6 @@ class EnhancedCompendiumWindow(QMainWindow):
         """Sanitize text by removing non-word characters for safe filenames."""
         return re.sub(r'\W+', '', text)
 
-    def _default_extension_record(self):
-        """Return a default extension payload for one entry."""
-        return {"details": "", "tags": [], "relationships": [], "images": []}
-
-    def _normalize_extensions_to_uuid_keys(self):
-        """Ensure extensions.entries is uuid-keyed; migrate legacy name-keyed data."""
-        extensions = self.compendium_data.setdefault("extensions", {})
-        ext_entries = extensions.get("entries")
-        if not isinstance(ext_entries, dict):
-            ext_entries = {}
-
-        changed = False
-        migrated_entries = {}
-        for cat in self.compendium_data.get("categories", []):
-            for entry in cat.get("entries", []):
-                entry_name = entry.get("name", "")
-                entry_uuid = entry.get("uuid")
-                if not entry_uuid:
-                    entry_uuid = str(uuid.uuid4())
-                    entry["uuid"] = entry_uuid
-                    changed = True
-
-                extension_data = ext_entries.get(entry_uuid)
-                if extension_data is None and entry_name in ext_entries:
-                    extension_data = ext_entries.get(entry_name)
-                    changed = True
-                if not isinstance(extension_data, dict):
-                    extension_data = self._default_extension_record()
-                    changed = True
-
-                migrated_entries[entry_uuid] = {
-                    "details": extension_data.get("details", ""),
-                    "tags": extension_data.get("tags", []),
-                    "relationships": extension_data.get("relationships", []),
-                    "images": extension_data.get("images", []),
-                }
-
-        if ext_entries != migrated_entries:
-            changed = True
-        self.compendium_data["extensions"]["entries"] = migrated_entries
-        return changed
-
     def _entry_uuid_from_item(self, entry_item):
         """Return an entry's UUID from tree item data, creating one if missing."""
         entry_uuid = entry_item.data(2, Qt.UserRole)
@@ -553,6 +499,14 @@ class EnhancedCompendiumWindow(QMainWindow):
             entry_item.setData(2, Qt.UserRole, entry_uuid)
         return entry_uuid
 
+    def _find_entry_in_data(self, entry_uuid):
+        """Return the entry dict from categories for the given uuid, or None."""
+        for cat in self.compendium_data.get("categories", []):
+            for entry in cat.get("entries", []):
+                if entry.get("uuid") == entry_uuid:
+                    return entry
+        return None
+
     def populate_compendium(self):
         """Populate the tree view with compendium data from the manager."""
         selected_item_info = self.get_selected_item_info()
@@ -560,11 +514,11 @@ class EnhancedCompendiumWindow(QMainWindow):
         bold_font = QFont()
         bold_font.setBold(True)
         # Always reload from disk so the tree reflects the authoritative file state.
+        # Migration of any legacy formats is performed by CompendiumManager;
+        # EnhancedCompendium should only consume the canonical unified structure.
         self.compendium_data = self.manager.load_data()
-        if self._normalize_extensions_to_uuid_keys():
-            self.save_compendium_to_file()
         for cat in self.compendium_data.get("categories", []):
-            cat_name = cat.get("name", "Unnamed Category")
+            cat_name = cat.get("name")
             cat_item = QTreeWidgetItem(self.tree, [cat_name])
             cat_item.setData(0, Qt.UserRole, "category")
             cat_item.setBackground(0, QBrush(ThemeManager.get_category_background_color()))
@@ -660,8 +614,8 @@ class EnhancedCompendiumWindow(QMainWindow):
     def save_entry(self, entry_item):
         """
         Persist the currently displayed entry back to self.compendium_data and then to disk.
-        Updates both the canonical categories[].entries[] record (content, uuid) and the
-        extensions record (details, tags, relationships, images).
+        Updates the unified categories[].entries[] record with all fields: content, uuid,
+        details, tags, relationships, and images.
         """
         entry_name = entry_item.text(0)
         entry_uuid = self._entry_uuid_from_item(entry_item)
@@ -672,36 +626,41 @@ class EnhancedCompendiumWindow(QMainWindow):
         content = self.editor.toPlainText()
         # Keep the tree item's cached content in sync.
         entry_item.setData(1, Qt.UserRole, content)
-        # Update the canonical entry in categories[].entries[].
+
+        # Collect enhanced-only fields from the UI.
+        details = self.details_editor.toPlainText()
+        tags = [
+            {"name": self.tags_list.item(i).text(), "color": self.tags_list.item(i).data(Qt.UserRole)}
+            for i in range(self.tags_list.count())
+        ]
+        relationships = [
+            {"name": self.relationships_list.topLevelItem(i).text(0), "type": self.relationships_list.topLevelItem(i).text(1)}
+            for i in range(self.relationships_list.topLevelItemCount())
+        ]
+        images = self.get_images()
+
+        # Update the unified entry in categories[].entries[].
         for cat in self.compendium_data["categories"]:
             if cat.get("name") == category_name:
                 for entry in cat.get("entries", []):
                     if entry.get("name") == entry_name:
                         entry["content"] = content
                         entry["uuid"] = entry_uuid
+                        entry["details"] = details
+                        entry["tags"] = tags
+                        entry["relationships"] = relationships
+                        entry["images"] = images
                         break
                 else:
                     # Entry not yet in the list — add it (safety fallback).
-                    new_entry = {
-                        "name": entry_name,
-                        "content": content,
-                        "uuid": entry_uuid
-                    }
+                    new_entry = self.manager.make_empty_entry(entry_name, content)
+                    new_entry["uuid"] = entry_uuid
+                    new_entry["details"] = details
+                    new_entry["tags"] = tags
+                    new_entry["relationships"] = relationships
+                    new_entry["images"] = images
                     cat["entries"].append(new_entry)
                 break
-        # Update the extensions record with enhanced-only fields.
-        extensions = self.compendium_data.setdefault("extensions", {}).setdefault("entries", {})
-        extended_data = extensions.setdefault(entry_uuid, self._default_extension_record())
-        extended_data["details"] = self.details_editor.toPlainText()
-        extended_data["tags"] = [
-            {"name": self.tags_list.item(i).text(), "color": self.tags_list.item(i).data(Qt.UserRole)}
-            for i in range(self.tags_list.count())
-        ]
-        extended_data["relationships"] = [
-            {"name": self.relationships_list.topLevelItem(i).text(0), "type": self.relationships_list.topLevelItem(i).text(1)}
-            for i in range(self.relationships_list.topLevelItemCount())
-        ]
-        extended_data["images"] = self.get_images()
 
         return self.save_compendium_to_file()
 
@@ -727,32 +686,27 @@ class EnhancedCompendiumWindow(QMainWindow):
             cat_item.setBackground(0, QBrush(ThemeManager.get_category_background_color()))
             cat_item.setFont(0, QFont("", weight=QFont.Bold))
             # Add to the canonical categories list and persist.
-            self.compendium_data["categories"].append({"name": name, "entries": []})
+            self.compendium_data["categories"].append(self.manager.make_empty_category(name))
             self.save_compendium_to_file()
 
     def new_entry(self, category_item):
         """Create a new entry under the specified category."""
         name, ok = QInputDialog.getText(self, _("New Entry"), _("Entry name:"))
         if ok and name:
+            new_entry_dict = self.manager.make_empty_entry(name)
+            new_uuid = new_entry_dict["uuid"]
+
             entry_item = QTreeWidgetItem(category_item, [name])
             entry_item.setData(0, Qt.UserRole, "entry")
             entry_item.setData(1, Qt.UserRole, "")
-            new_uuid = str(uuid.uuid4())
             entry_item.setData(2, Qt.UserRole, new_uuid)
 
-            # Add to the canonical categories[].entries[] list so the entry is visible to the rest of the
-            # app (project compendium panel, POV selector, AI context).
-            # Without this the entry only exists in the extensions dict and disappears on the next
-            # populate_compendium().
+            # Add unified entry to canonical categories[].entries[] so the entry is
+            # visible to the rest of the app (project compendium panel, POV selector, AI context).
             for cat in self.compendium_data["categories"]:
                 if cat.get("name") == category_item.text(0):
-                    cat["entries"].append({"name": name, "content": "", "uuid": new_uuid})
+                    cat["entries"].append(new_entry_dict)
                     break
-
-            # Add the extensions record for enhanced-only fields.
-            self.compendium_data["extensions"]["entries"][new_uuid] = {
-                "details": "", "tags": [], "relationships": [], "images": []
-            }
 
             category_item.setExpanded(True)
             self.tree.setCurrentItem(entry_item)
@@ -765,12 +719,6 @@ class EnhancedCompendiumWindow(QMainWindow):
             _("Are you sure you want to delete the category '{}' and all its entries?").format(category_item.text(0)),
             QMessageBox.Yes | QMessageBox.No)
         if confirm == QMessageBox.Yes:
-            # Remove extensions records for all child entries.
-            for i in range(category_item.childCount()):
-                entry_item = category_item.child(i)
-                entry_uuid = self._entry_uuid_from_item(entry_item)
-                if entry_uuid in self.compendium_data["extensions"]["entries"]:
-                    del self.compendium_data["extensions"]["entries"][entry_uuid]
             root = self.tree.invisibleRootItem()
             root.removeChild(category_item)
             # Remove from the canonical categories list.
@@ -787,10 +735,6 @@ class EnhancedCompendiumWindow(QMainWindow):
             _("Are you sure you want to delete the entry '{}'?").format(entry_name),
             QMessageBox.Yes | QMessageBox.No)
         if confirm == QMessageBox.Yes:
-            # Remove extensions record.
-            entry_uuid = self._entry_uuid_from_item(entry_item)
-            if entry_uuid in self.compendium_data["extensions"]["entries"]:
-                del self.compendium_data["extensions"]["entries"][entry_uuid]
             parent = entry_item.parent()
             if parent:
                 parent.removeChild(entry_item)
@@ -882,19 +826,28 @@ class EnhancedCompendiumWindow(QMainWindow):
                 current_parent = entry_item.parent()
                 if current_parent is not None:
                     current_parent.removeChild(entry_item)
-                    # Remove from the old category's canonical list.
+                    # Remove from the old category's canonical list, capturing the full entry dict.
+                    entry_uuid = entry_item.data(2, Qt.UserRole)
+                    entry_dict = None
                     for cat in self.compendium_data["categories"]:
                         if cat.get("name") == current_parent.text(0):
-                            cat["entries"] = [e for e in cat.get("entries", []) if e.get("name") != entry_item.text(0)]
+                            for e in cat.get("entries", []):
+                                if e.get("uuid") == entry_uuid or e.get("name") == entry_item.text(0):
+                                    entry_dict = e
+                                    break
+                            cat["entries"] = [e for e in cat.get("entries", []) if e is not entry_dict]
                             break
-                # Add to the new category's canonical list.
+                    if entry_dict is None:
+                        # Fallback: reconstruct a minimal unified entry via the manager factory.
+                        entry_dict = self.manager.make_empty_entry(
+                            entry_item.text(0),
+                            entry_item.data(1, Qt.UserRole) or "",
+                        )
+                        entry_dict["uuid"] = entry_uuid
+                # Add to the new category's canonical list (with all unified fields preserved).
                 for cat in self.compendium_data["categories"]:
                     if cat.get("name") == target_category.text(0):
-                        cat["entries"].append({
-                            "name": entry_item.text(0),
-                            "content": entry_item.data(1, Qt.UserRole),
-                            "uuid": entry_item.data(2, Qt.UserRole)
-                        })
+                        cat["entries"].append(entry_dict)
                         break
                 target_category.addChild(entry_item)
                 target_category.setExpanded(True)
@@ -941,7 +894,7 @@ class EnhancedCompendiumWindow(QMainWindow):
         """
         Load all data for the selected entry into the UI panels.
         Populates the Overview editor from categories[].entries[].content and the
-        Details/Tags/Relationships/Images panels from extensions.
+        Details/Tags/Relationships/Images panels from the same unified entry dict.
 
         Args:
             entry_name (str): Name of the entry
@@ -963,38 +916,30 @@ class EnhancedCompendiumWindow(QMainWindow):
         self.editor.blockSignals(False)
         entry_uuid = self._entry_uuid_from_item(entry_item)
         self.current_entry_uuid = entry_uuid
-        # Load the enhanced extensions data if it exists.
-        has_extended = entry_uuid in self.compendium_data["extensions"]["entries"]
-        if has_extended:
-            extended_data = self.compendium_data["extensions"]["entries"][entry_uuid]
-            self.details_editor.blockSignals(True)
-            self.details_editor.setPlainText(extended_data.get("details", ""))
-            self.details_editor.blockSignals(False)
-            self.tags_list.clear()
-            for tag in extended_data.get("tags", []):
-                # Tags can be stored as dicts {name, color} or plain strings (legacy).
-                if isinstance(tag, dict):
-                    tag_name = tag.get("name", "")
-                    tag_color = tag.get("color", "#000000")
-                else:
-                    tag_name = tag
-                    tag_color = "#000000"
-                item = QListWidgetItem(tag_name)
-                item.setData(Qt.UserRole, tag_color)
-                item.setForeground(QBrush(QColor(tag_color)))
-                item.setToolTip(_("right-click to move the tag within this list - this impacts the colour of your entry"))
-                self.tags_list.addItem(item)
-            self.relationships_list.clear()
-            for rel in extended_data.get("relationships", []):
-                rel_item = QTreeWidgetItem([rel.get("name", ""), rel.get("type", "")])
-                self.relationships_list.addTopLevelItem(rel_item)
-            self.load_images(extended_data.get("images", []))
-        else:
-            self.details_editor.clear()
-            self.tags_list.clear()
-            self.relationships_list.clear()
-            self.clear_images()
-            self._current_images = []
+        # Load extended fields directly from the unified entry dict.
+        entry_data = self._find_entry_in_data(entry_uuid) or {}
+        self.details_editor.blockSignals(True)
+        self.details_editor.setPlainText(entry_data.get("details", ""))
+        self.details_editor.blockSignals(False)
+        self.tags_list.clear()
+        for tag in entry_data.get("tags", []):
+            # Tags can be stored as dicts {name, color} or plain strings (legacy).
+            if isinstance(tag, dict):
+                tag_name = tag.get("name", "")
+                tag_color = tag.get("color", "#000000")
+            else:
+                tag_name = tag
+                tag_color = "#000000"
+            item = QListWidgetItem(tag_name)
+            item.setData(Qt.UserRole, tag_color)
+            item.setForeground(QBrush(QColor(tag_color)))
+            item.setToolTip(_("right-click to move the tag within this list - this impacts the colour of your entry"))
+            self.tags_list.addItem(item)
+        self.relationships_list.clear()
+        for rel in entry_data.get("relationships", []):
+            rel_item = QTreeWidgetItem([rel.get("name", ""), rel.get("type", "")])
+            self.relationships_list.addTopLevelItem(rel_item)
+        self.load_images(entry_data.get("images", []))
         self.update_entry_indicator()
         self._reset_dirty()
         self.tabs.show()
@@ -1197,8 +1142,8 @@ class EnhancedCompendiumWindow(QMainWindow):
     def update_entry_indicator(self):
         """Update the entry name label colour: green if the entry has any relationships."""
         if hasattr(self, 'current_entry_uuid'):
-            relationships = self.compendium_data["extensions"]["entries"].get(self.current_entry_uuid, {}).get(
-                "relationships", [])
+            entry_data = self._find_entry_in_data(self.current_entry_uuid) or {}
+            relationships = entry_data.get("relationships", [])
             if relationships:
                 self.entry_name_label.setStyleSheet("font-size: 16pt; font-weight: bold; color: green;")
             else:
@@ -1219,7 +1164,8 @@ class EnhancedCompendiumWindow(QMainWindow):
                 entry_item = cat_item.child(j)
                 entry_name = entry_item.text(0).lower()
                 entry_uuid = self._entry_uuid_from_item(entry_item)
-                entry_tags = self.compendium_data["extensions"]["entries"].get(entry_uuid, {}).get("tags", [])
+                entry_data = self._find_entry_in_data(entry_uuid) or {}
+                entry_tags = entry_data.get("tags", [])
                 tag_names = [tag.get("name", "").lower() if isinstance(tag, dict) else tag.lower() for tag in entry_tags]
                 entry_visible = search_text in entry_name or any(search_text in tag for tag in tag_names)
                 entry_item.setHidden(not entry_visible)

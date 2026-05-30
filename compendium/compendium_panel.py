@@ -269,18 +269,17 @@ Return only the JSON result without additional commentary. The JSON should maint
 
     def save_ai_analysis(self, ai_compendium):
         try:
-            ai_compendium.setdefault("extensions", {"entries": {}})
+            # Ensure every entry coming back from the AI has the full set of unified
+            # fields inline so upsert_data can merge it cleanly.
             for cat in ai_compendium.get("categories", []):
                 for entry in cat.get("entries", []):
-                    entry_name = entry.get("name")
-                    if entry_name:
-                        entry_uuid = entry.setdefault("uuid", str(uuid.uuid4()))
-                        ai_compendium["extensions"]["entries"][entry_uuid] = {
-                            "relationships": entry.get("relationships", []),
-                            "details": "",
-                            "tags": [],
-                            "images": []
-                        }
+                    entry.setdefault("uuid", str(uuid.uuid4()))
+                    entry.setdefault("details", "")
+                    entry.setdefault("tags", [])
+                    entry.setdefault("relationships", [])
+                    entry.setdefault("images", [])
+            # Drop any legacy extensions key that might have been returned by the AI.
+            ai_compendium.pop("extensions", None)
             self.manager.upsert_data(ai_compendium)
             self.populate_compendium()
             QMessageBox.information(self, _("Success"), _("Compendium updated successfully."))
