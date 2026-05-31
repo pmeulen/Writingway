@@ -8,10 +8,10 @@ Activate the project virtual environment before running any commands:
 source venv/bin/activate
 ```
 
-Install the test dependencies if you have not done so already:
+Install the dev dependencies if you have not done so already:
 
 ```bash
-pip install pytest pytest-qt pytest-cov
+pip install ".[dev]"
 ```
 
 ---
@@ -65,8 +65,18 @@ python -m pytest -k "category and not remove"
 ## Coverage report
 
 ```bash
-# Terminal summary
+# Terminal summary, including missing lines
 python -m pytest tests/ --cov=. --cov-report=term-missing
+
+# Terminal summary, coverage only
+python -m pytest tests/ --cov=. --cov-report=term
+
+# Report coverage for a specific package (e.g. compendium)
+python -m pytest tests/ --cov=compendium --cov-report=term
+
+# Report coverage for a specific directory (e.g. ./project_window)
+python -m pytest tests/ --cov=./project_window --cov-report=term
+
 
 # HTML report (opens at htmlcov/index.html)
 python -m pytest tests/ --cov=. --cov-report=html
