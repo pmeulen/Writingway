@@ -26,8 +26,9 @@ class CompendiumEventBus:
 
     def add_updated_listener(self, callback: Callable[[str], None]):
         self.updated_listeners.append(callback)
-        if hasattr(callback, '__self__'):
-                self._weak_refs.add(callback.__self__)
+        callback_self = getattr(callback, "__self__", None)
+        if callback_self is not None:
+            self._weak_refs.add(callback_self)
 
     def remove_updated_listener(self, callback: Callable[[str], None]):
         """Safely remove a listener."""
@@ -47,7 +48,7 @@ class CompendiumEventBus:
         """Remove listeners whose objects have been garbage collected."""
         to_remove = []
         for cb in self.updated_listeners:
-            if hasattr(cb, '__self__') and cb.__self__ is None:
+            if getattr(cb, "__self__", object()) is None:
                 to_remove.append(cb)
         for cb in to_remove:
             self.remove_updated_listener(cb)
@@ -199,7 +200,7 @@ class CompendiumManager:
         changed = False
         current_version = 3
 
-        default_compendium_data = {
+        default_compendium_data: dict[str, Any] = {
             "categories": [
                 {
                     "version": current_version,
@@ -231,9 +232,14 @@ class CompendiumManager:
             data = default_compendium_data
             changed = True
 
+        if not isinstance(data, dict):
+            print(f"Invalid compendium payload in {self._filepath}. Initializing a new compendium.")
+            data = default_compendium_data
+            changed = True
+
         # Check if file version is newer than what this code understands.
         version = data.get("version", 1)
-        if version > current_version:
+        if isinstance(version, int) and version > current_version:
             print(f"Warning: Compendium data version {version} is newer than supported version {current_version}.")
 
             msg = (
@@ -245,73 +251,111 @@ class CompendiumManager:
             QMessageBox.warning(None, "Compendium version mismatch", msg, QMessageBox.Ok)
 
             # Don't attempt convert the data, since we don't know the format. Return as-is.
-            return False
+            return data
 
         # Ensure essential keys exist with a stable shape.
-        if "categories" not in data or data["categories"] is None:
+        categories_raw = data.get("categories")
+        if categories_raw is None:
+            data["categories"] = []
+            changed = True
+        elif not isinstance(categories_raw, (list, dict)):
             data["categories"] = []
             changed = True
 
         # Convert legacy dict format to list of categories
-        if isinstance(data["categories"], dict):
+        categories_dict = data.get("categories")
+        if isinstance(categories_dict, dict):
             print("Converting compendium legacy dict format to list of categories")
             new_categories = [
                 {"name": cat, "entries": [
                     {"name": name, "content": content, "uuid": str(uuid4())}
                     for name, content in entries.items()
-                ]} for cat, entries in data["categories"].items()
+                    if isinstance(entries, dict)
+                ]} for cat, entries in categories_dict.items()
             ]
             data["categories"] = new_categories
             changed = True
 
         # Ensure every entry and category has an unique uuid
-        seen_uuids = set()
-        for cat in data.get("categories", []):
-            if not cat.get("uuid"):
+        seen_uuids: set[str] = set()
+        categories = data.get("categories", [])
+        if not isinstance(categories, list):
+            categories = []
+            data["categories"] = categories
+            changed = True
+
+        normalized_categories: list[dict[str, Any]] = []
+        for cat in categories:
+            if not isinstance(cat, dict):
+                changed = True
+                continue
+
+            cat_uuid_value = cat.get("uuid")
+            cat_uuid = cat_uuid_value if isinstance(cat_uuid_value, str) and cat_uuid_value else ""
+            if not cat_uuid:
                 print("Fixing compendium category missing UUID")
-                cat["uuid"] = str(uuid4())
+                cat_uuid = str(uuid4())
+                cat["uuid"] = cat_uuid
                 changed = True
 
-            uuid = cat.get("uuid")
             # If category has no uuid, give it one
-            if uuid in seen_uuids:
+            if cat_uuid in seen_uuids:
                 new_uuid = str(uuid4())
-                print(f"UUID {uuid} is already used by another compendium category. Assigning UUID {new_uuid}")
+                print(f"UUID {cat_uuid} is already used by another compendium category. Assigning UUID {new_uuid}")
                 cat["uuid"] = new_uuid
+                cat_uuid = new_uuid
                 changed = True
-            seen_uuids.add(uuid)
+            seen_uuids.add(cat_uuid)
 
-            for entry in cat.get("entries", []):
-                # If entry has no uuid, give it one
-                if not entry.get("uuid"):
-                    print("Fixing compendium entry missing UUID")
-                    entry["uuid"] = str(uuid4())
+            cat_name_value = cat.get("name")
+            if not isinstance(cat_name_value, str) or len(cat_name_value) == 0:
+                cat["name"] = f"Category {cat_uuid}"
+                changed = True
+
+            entries_raw = cat.get("entries", [])
+            if not isinstance(entries_raw, list):
+                entries_raw = []
+                cat["entries"] = entries_raw
+                changed = True
+
+            normalized_entries: list[dict[str, Any]] = []
+            for entry in entries_raw:
+                if not isinstance(entry, dict):
                     changed = True
+                    continue
 
-                # If category has no name, give it one
-                name: str = entry.get("name", "")
-                if len(name) == 0:
-                    print("Fixing compendium category missing name")
-                    id = cat.get("uuid")
-                    cat["name"] = f"Category {id}"
+                # If entry has no uuid, give it one
+                entry_uuid_value = entry.get("uuid")
+                entry_uuid = entry_uuid_value if isinstance(entry_uuid_value, str) and entry_uuid_value else ""
+                if not entry_uuid:
+                    print("Fixing compendium entry missing UUID")
+                    entry_uuid = str(uuid4())
+                    entry["uuid"] = entry_uuid
                     changed = True
 
                 # Ensure uuid is unique across all entries. If not, give it a new one.
-                uuid = entry.get("uuid")
-                if uuid in seen_uuids:
+                if entry_uuid in seen_uuids:
                     # Duplicate uuid found
                     new_uuid = str(uuid4())
-                    print(f"UUID {uuid} is already used by another compendium entry. Assigning UUID {new_uuid}")
+                    print(f"UUID {entry_uuid} is already used by another compendium entry. Assigning UUID {new_uuid}")
                     entry["uuid"] = new_uuid
+                    entry_uuid = new_uuid
                     changed = True
-                seen_uuids.add(entry.get("uuid"))
+                seen_uuids.add(entry_uuid)
 
                 # If entry has no name, give it an unique name
-                name: str = entry.get("name", "")
+                name_value = entry.get("name", "")
+                name = name_value if isinstance(name_value, str) else ""
                 if len(name) == 0:
-                    id = entry.get("uuid")
-                    entry["name"] = f"Entry {id}"
+                    entry["name"] = f"Entry {entry_uuid}"
                     changed = True
+
+                normalized_entries.append(entry)
+
+            cat["entries"] = normalized_entries
+            normalized_categories.append(cat)
+
+        data["categories"] = normalized_categories
 
         if "extensions" in data:
             # Migrate from format with extensions to unified format
@@ -319,16 +363,26 @@ class CompendiumManager:
             changed = True
 
             # Build lookup from extensions -> entries
-            ext_entries = data.get("extensions", {}).get("entries", {})
+            extensions_data = data.get("extensions", {})
+            ext_entries = extensions_data.get("entries", {}) if isinstance(extensions_data, dict) else {}
 
             # Lookup each entry by name in the extensions. The name of the entry is the key in extensions
             # Name is not necessarily unique, but this is an issue in the old data format and won't cause data loss, only duplication
             for cat in data["categories"]:
-                for entry in cat.get("entries", []):
+                entries = cat.get("entries", []) if isinstance(cat, dict) else []
+                if not isinstance(entries, list):
+                    continue
+                for entry in entries:
+                    if not isinstance(entry, dict):
+                        continue
                     entry_name = entry.get("name")
+                    if not isinstance(entry_name, str):
+                        entry_name = ""
 
                     # Copy fields from entries, set to default otherwise
-                    extension_data = ext_entries.get(entry_name) or {}
+                    extension_data = ext_entries.get(entry_name) if isinstance(ext_entries, dict) else {}
+                    if not isinstance(extension_data, dict):
+                        extension_data = {}
                     entry["details"] = extension_data.get("details", "")
                     entry["tags"] = extension_data.get("tags", [])
                     entry["relationships"] = extension_data.get("relationships", [])
@@ -367,7 +421,7 @@ class CompendiumManager:
             os.makedirs(os.path.dirname(self._filepath), exist_ok=True)
             with open(self._filepath, "w", encoding="utf-8") as f:
                 json.dump(compendium_data, f, indent=2)
-            if notify and self.event_bus:
+            if notify and self.event_bus and isinstance(self.project_name, str):
                 self.event_bus.notify_updated(self.project_name)
         except Exception as e:
             print(f"Error saving compendium data to {self._filepath}: {e}")
