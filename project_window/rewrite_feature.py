@@ -110,8 +110,8 @@ class RewriteDialog(QDialog):
         try:
             self.worker = LLMWorker(final_prompt, overrides)
             self.worker.data_received.connect(self.update_text)
-            self.worker.finished.connect(self.on_finished)
-            self.worker.finished.connect(self.cleanup_worker)  # Schedule thread deletion
+            self.worker.stream_finished.connect(self.on_finished)
+            self.worker.stream_finished.connect(self.cleanup_worker)  # Schedule thread deletion
             self.worker.start()
         except Exception as e:
             QMessageBox.warning(self, _("Rewrite"), _("Error sending prompt to LLM: {}").format(str(e)))
@@ -135,7 +135,7 @@ class RewriteDialog(QDialog):
         if self.worker:
             try:
                 self.worker.data_received.disconnect()
-                self.worker.finished.disconnect()
+                self.worker.stream_finished.disconnect()
             except TypeError:
                 pass  # Signals may already be disconnected
             self.worker.deleteLater()  # Schedule deletion

@@ -296,7 +296,8 @@ class ProjectCoverWidget(QWidget):
     """
     A composite widget that displays the project title above the cover.
     """
-    openProject = pyqtSignal(str)
+    # Emitted with (project_name: str)
+    openProject: pyqtSignal = pyqtSignal(str)
 
     def __init__(self, project, parent=None):
         super().__init__(parent)

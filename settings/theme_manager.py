@@ -17,8 +17,8 @@ class ThemeManager(QObject):
       - Generate tinted SVG icons using QSvgRenderer.
     """
 
-    # Signal emitted when theme changes
-    themeChanged = pyqtSignal(str)
+    # Signal emitted when theme changes: (theme_name: str)
+    themeChanged: pyqtSignal = pyqtSignal(str)
 
     _instance = None
     _icon_cache = {}  # Cache: (file_path, tint_color) -> QIcon

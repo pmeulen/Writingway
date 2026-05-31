@@ -8,7 +8,7 @@ from PyQt5.QtCore import QThread, pyqtSignal
 
 
 class AudioRecorder(QThread):
-    finished = pyqtSignal(str)
+    recording_finished = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
@@ -50,7 +50,7 @@ class AudioRecorder(QThread):
             wf.setframerate(RATE)
             wf.writeframes(b''.join(frames))
             wf.close()
-            self.finished.emit(self.output_file)
+            self.recording_finished.emit(self.output_file)
 
     def stop_recording(self):
         self.is_recording = False
@@ -62,7 +62,7 @@ class AudioRecorder(QThread):
         self.is_paused = False
 
 class TranscriptionWorker(QThread):
-    finished = pyqtSignal(str)
+    transcription_ready = pyqtSignal(str)
 
     def __init__(self, file_path, model_name="tiny", language=None):
         super().__init__()
@@ -74,6 +74,6 @@ class TranscriptionWorker(QThread):
         try:
             model = whisper.load_model(self.model_name)
             result = model.transcribe(self.file_path, language=self.language)
-            self.finished.emit(result["text"])
+            self.transcription_ready.emit(result["text"])
         except Exception as e:
-            self.finished.emit(f"Error: {e!s}")
+            self.transcription_ready.emit(f"Error: {e!s}")

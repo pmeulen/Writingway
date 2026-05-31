@@ -6,9 +6,12 @@ from .llm_api_aggregator import WWApiAggregator
 
 
 class LLMWorker(QThread):
-    data_received = pyqtSignal(str)
-    finished = pyqtSignal()
-    token_limit_exceeded = pyqtSignal(str)
+    # Emitted for each chunk of data received from streaming LLM
+    data_received: pyqtSignal = pyqtSignal(str)
+    # Emitted when streaming is finished
+    stream_finished: pyqtSignal = pyqtSignal()
+    # Emitted when the LLM reports a token limit error (message)
+    token_limit_exceeded: pyqtSignal = pyqtSignal(str)
 
     def __init__(self, prompt: str, overrides: dict | None = None, conversation_history: list | None = None):
         super().__init__()
@@ -36,11 +39,11 @@ class LLMWorker(QThread):
                 logging.debug(f"Emitting chunk: '{chunk[:50]}'")  # Log first 50 chars of chunk
                 self.data_received.emit(chunk)
             logging.debug(f"LLMWorker: Streaming completed processing {i} chunks")
-            self.finished.emit()
+            self.stream_finished.emit()
         except Exception as e:
             logging.error(f"LLMWorker streaming error: {e}")
             self.data_received.emit(f"Error: {e}")
-            self.finished.emit()
+            self.stream_finished.emit()
         finally:
             logging.debug(f"LLMWorker finished: {id(self)}")
 

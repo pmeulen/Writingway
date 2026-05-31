@@ -39,8 +39,10 @@ logger = logging.getLogger(__name__)
 
 class DocumentRenderer(QObject):
     """Class to handle document rendering with PyMuPDF."""
-    page_rendered = pyqtSignal(QPixmap, int, int)
-    render_error = pyqtSignal(str)
+    # Emitted with (pixmap: QPixmap, page_num: int, total_pages: int)
+    page_rendered: pyqtSignal = pyqtSignal(QPixmap, int, int)
+    # Emitted on rendering error with an error message
+    render_error: pyqtSignal = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()

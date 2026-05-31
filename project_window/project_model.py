@@ -15,8 +15,10 @@ from .tree_manager import get_structure_file_path, load_structure, save_structur
 
 class ProjectModel(QObject):
     """Manages project data and persistence."""
-    structureChanged = pyqtSignal(list, str)
-    errorOccurred = pyqtSignal(str)
+    # Emitted with (structure: list, uuid: str)
+    structureChanged: pyqtSignal = pyqtSignal(list, str)
+    # Emitted with (error_message: str)
+    errorOccurred: pyqtSignal = pyqtSignal(str)
 
     def __init__(self, project_name: str):
         super().__init__()

@@ -321,7 +321,7 @@ class ManualProcessingWidget(QWidget):
             self.manual_process_btn.setEnabled(False)
 
             self.manual_worker = PdfProcessingWorker(file_path, sections, self.manual_chunk_spin.value())
-            self.manual_worker.finished.connect(self.on_manual_pdf_processing_finished)
+            self.manual_worker.processing_finished.connect(self.on_manual_pdf_processing_finished)
             self.manual_worker.start()
         except ValueError as e:
             QMessageBox.warning(self, "Unsupported Format", str(e))

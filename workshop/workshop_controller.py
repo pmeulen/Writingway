@@ -326,7 +326,7 @@ class WorkshopController:
         overrides = self.view.prompt_panel.get_overrides()
         self.worker = LLMWorker(payload, overrides)
         self.worker.data_received.connect(self.handle_stream_data)
-        self.worker.finished.connect(self.handle_stream_finished)
+        self.worker.stream_finished.connect(self.handle_stream_finished)
         self.worker.token_limit_exceeded.connect(self.handle_token_limit)
         self.worker.start()
         self.is_streaming = True
@@ -380,7 +380,7 @@ class WorkshopController:
     def cleanup_worker(self):
         if self.worker:
             self.worker.data_received.disconnect()
-            self.worker.finished.disconnect()
+            self.worker.stream_finished.disconnect()
             self.worker.token_limit_exceeded.disconnect()
             self.worker.deleteLater()
             self.worker = None
@@ -424,7 +424,7 @@ class WorkshopController:
         recording_file = tempfile.mktemp(suffix='.wav')
         self.view.recorder = AudioRecorder()
         self.view.recorder.setup_recording(recording_file)
-        self.view.recorder.finished.connect(self.on_recording_finished)
+        self.view.recorder.recording_finished.connect(self.on_recording_finished)
         self.view.recorder.start()
         self.start_time = datetime.datetime.now()
         self.pause_start = None
@@ -464,7 +464,7 @@ class WorkshopController:
         self.view.set_override_cursor(self.waiting_cursor)
         language = None if self.view.language_combo.currentText() == "Auto" else self.view.language_combo.currentText()
         self.view.transcription_worker = TranscriptionWorker(file_path, self.view.model_combo.currentText(), language)
-        self.view.transcription_worker.finished.connect(self.handle_transcription)
+        self.view.transcription_worker.transcription_ready.connect(self.handle_transcription)
         self.view.transcription_worker.start()
 
     def handle_transcription(self, text):

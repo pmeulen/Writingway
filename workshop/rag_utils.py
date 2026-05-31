@@ -461,7 +461,7 @@ class LlmClient:
             return "", f"Error calling LLM API: {e}"
 
 class PdfProcessingWorker(QThread):
-    finished = pyqtSignal(str, list, str)
+    processing_finished = pyqtSignal(str, list, str)
     progress = pyqtSignal(int)
 
     def __init__(self, file_path: str, pages: list[int], max_tokens: int = None):
@@ -477,23 +477,23 @@ class PdfProcessingWorker(QThread):
         try:
             markdown, error = self.processor.convert_to_markdown(self.file_path, self.pages)
             if error:
-                self.finished.emit("", [], error)
+                self.processing_finished.emit("", [], error)
                 return
             if self.max_tokens:
                 chunks = PdfProcessor.chunk_text_intelligently(markdown, self.max_tokens)
             else:
                 chunks = []
-            self.finished.emit(markdown, chunks, "")
+            self.processing_finished.emit(markdown, chunks, "")
         except Exception as e:
-            self.finished.emit("", [], f"Error processing document: {e!s}")
+            self.processing_finished.emit("", [], f"Error processing document: {e!s}")
 
 class EpubProcessingWorker(QThread):
     """
     QThread that reads an EPUB file, splits each selected chapter into
     individual <p>…</p> paragraphs, and emits:
-      finished(markdown_str, list_of_paragraphs, error_str)
+      processing_finished(markdown_str, list_of_paragraphs, error_str)
     """
-    finished = pyqtSignal(str, list, str)
+    processing_finished = pyqtSignal(str, list, str)
 
     def __init__(self, file_path: str, chapters: list[int]):
         super().__init__()
@@ -509,7 +509,7 @@ class EpubProcessingWorker(QThread):
             )
             if err:
                 # on error, emit empty markdown + empty list + error
-                self.finished.emit("", [], err)
+                self.processing_finished.emit("", [], err)
                 return
 
             # 2) Split on double-newline (paragraph separators)
@@ -520,10 +520,10 @@ class EpubProcessingWorker(QThread):
             ]
 
             # 3) Emit full markdown and list of small paragraphs
-            self.finished.emit(full_md, paras, "")
+            self.processing_finished.emit(full_md, paras, "")
 
         except Exception as e:
-            self.finished.emit("", [], str(e))
+            self.processing_finished.emit("", [], str(e))
 
 class GenericProcessingWorker(QThread):
     """
@@ -531,7 +531,7 @@ class GenericProcessingWorker(QThread):
     format (DOCX, TXT/MD, HTML…) into markdown, then splits that markdown
     into paragraphs/sections and emits (full_markdown, list_of_chunks, error).
     """
-    finished = pyqtSignal(str, list, str)
+    processing_finished = pyqtSignal(str, list, str)
 
     def __init__(self, file_path: str, sections: list[int]):
         super().__init__()
@@ -574,7 +574,7 @@ class GenericProcessingWorker(QThread):
                 processor = DocumentProcessorFactory.get_processor(self.file_path)
                 full_md, err = processor.convert_to_markdown(self.file_path, chapters=self.sections)
                 if err:
-                    self.finished.emit("", [], err)
+                    self.processing_finished.emit("", [], err)
                     return
                 blocks = [
                     chunk.strip()
@@ -584,10 +584,10 @@ class GenericProcessingWorker(QThread):
 
             # 5) Reassemble full markdown and emit
             full_md = "\n\n".join(blocks)
-            self.finished.emit(full_md, blocks, "")
+            self.processing_finished.emit(full_md, blocks, "")
 
         except Exception as e:
-            self.finished.emit("", [], str(e))
+            self.processing_finished.emit("", [], str(e))
 
 class SettingsManager:
     SETTINGS_FILE = "pdf_rag_settings.json"

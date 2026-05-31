@@ -97,8 +97,10 @@ class CustomWebView(QWebEngineView):
             QMessageBox.critical(self, "Error", f"Failed to download image: {reply.errorString()}")
 
 class LLMWorker(QThread):
-    finished = pyqtSignal(str)
-    error = pyqtSignal(str)
+    # Emitted when the worker finishes with the response text
+    response_ready: pyqtSignal = pyqtSignal(str)
+    # Emitted on error with an error message
+    error: pyqtSignal = pyqtSignal(str)
 
     def __init__(self, prompt, content, conversation_history=None):
         super().__init__()
@@ -117,7 +119,7 @@ class LLMWorker(QThread):
 
             full_prompt = f"{history_text}User: {self.prompt}\n\nWeb Content:\n{self.content}"
             response = WWApiAggregator.send_prompt_to_llm(full_prompt)
-            self.finished.emit(response)
+            self.response_ready.emit(response)
         except Exception as e:
             self.error.emit(str(e))
 
@@ -1007,7 +1009,7 @@ class MainWindow(QWidget):
             combined_prompt = f"Web Content:\n{content}\n\nUser: {prompt}"
 
             self.llm_worker = LLMWorker(combined_prompt, "", history)
-            self.llm_worker.finished.connect(self.handle_llm_response)
+            self.llm_worker.response_ready.connect(self.handle_llm_response)
             self.llm_worker.error.connect(self.handle_llm_error)
             self.llm_worker.start()
         except Exception as e:

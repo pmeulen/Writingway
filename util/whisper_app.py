@@ -51,8 +51,8 @@ warnings.filterwarnings("ignore", message="FP16 is not supported on CPU; using F
 
 # ------------------------------ Model Download Dialog ------------------------------
 class ModelDownloadThread(QThread):
-    # Signal emitted when the download is finished
-    finished_signal = pyqtSignal(bool, str)
+    # Emitted when model download finishes: (success: bool, result: str)
+    finished_signal: pyqtSignal = pyqtSignal(bool, str)
 
     def __init__(self, model_name):
         super().__init__()
@@ -149,7 +149,8 @@ class ModelDownloadDialog(QDialog):
 
 # ----------------------- Transcription History Dialog -----------------------
 class TranscriptionHistoryDialog(QDialog):
-    transcription_selected = pyqtSignal(dict)
+    # Emitted with the selected transcription dict
+    transcription_selected: pyqtSignal = pyqtSignal(dict)
 
     def __init__(self, history_data, parent=None):
         super().__init__(parent)
@@ -280,7 +281,8 @@ class TranscriptionHistoryDialog(QDialog):
 
 # -------------------------- Audio Recorder Thread --------------------------
 class AudioRecorder(QThread):
-    finished = pyqtSignal(str)
+    # Emitted when recording finished with path to the output file
+    recording_finished: pyqtSignal = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
@@ -317,7 +319,7 @@ class AudioRecorder(QThread):
             wf.setframerate(RATE)
             wf.writeframes(b''.join(frames))
             wf.close()
-            self.finished.emit(self.output_file)
+            self.recording_finished.emit(self.output_file)
 
     def stop_recording(self):
         self.is_recording = False
@@ -330,9 +332,12 @@ class AudioRecorder(QThread):
 
 # ------------------------ Audio Separation Worker Thread ------------------------
 class AudioSeparationWorker(QThread):
-    finished = pyqtSignal(str)
-    log = pyqtSignal(str)
-    error = pyqtSignal(str)
+    # Emitted when separation completes with path to output file
+    separation_finished: pyqtSignal = pyqtSignal(str)
+    # Emitted to relay log messages
+    log: pyqtSignal = pyqtSignal(str)
+    # Emitted on error with an error message
+    error: pyqtSignal = pyqtSignal(str)
 
     def __init__(self, input_file):
         super().__init__()
@@ -379,19 +384,21 @@ class AudioSeparationWorker(QThread):
 
             self.log.emit("Voice separation completed successfully.")
             self.output_file = vocals_wav
-            self.finished.emit(vocals_wav)
+            self.separation_finished.emit(vocals_wav)
 
         except Exception as e:
             self.error.emit(f"Voice separation error: {e!s}")
-            self.finished.emit(self.input_file)  # Return original file on error
+            self.separation_finished.emit(self.input_file)  # Return original file on error
 
     def get_temp_dir(self):
         return self.temp_dir
 
 # ------------------------ Transcription Worker Thread ------------------------
 class TranscriptionWorker(QThread):
-    finished = pyqtSignal(str)
-    log = pyqtSignal(str)
+    # Emitted when transcription is finished with the resulting text
+    transcription_ready: pyqtSignal = pyqtSignal(str)
+    # Emitted to relay log messages during transcription
+    log: pyqtSignal = pyqtSignal(str)
 
     def __init__(self, file_path, model_name="tiny", language=None):
         super().__init__()
@@ -407,10 +414,10 @@ class TranscriptionWorker(QThread):
             options = {"language": self.language} if self.language and self.language.lower() != "auto" else {}
             result = model.transcribe(self.file_path, **options)
             self.log.emit("Transcription completed.")
-            self.finished.emit(result["text"])
+            self.transcription_ready.emit(result["text"])
         except Exception as e:
             self.log.emit(f"Error: {e!s}")
-            self.finished.emit("")
+            self.transcription_ready.emit("")
 
 # ----------------------------- Main Application Window -----------------------------
 class WhisperApp(QMainWindow):
@@ -953,7 +960,7 @@ class WhisperApp(QMainWindow):
             self.separation_worker = AudioSeparationWorker(self.current_processing_file)
             self.separation_worker.log.connect(self.update_log)
             self.separation_worker.error.connect(self.update_log)
-            self.separation_worker.finished.connect(self.after_audio_separation)
+            self.separation_worker.separation_finished.connect(self.after_audio_separation)
             self.separation_worker.start()
         else:
             # Skip to audio processing if voice separation is not needed
@@ -988,7 +995,7 @@ class WhisperApp(QMainWindow):
         self.log_text.append(f"Starting transcription for file: {os.path.basename(self.transcription_audio_file)}")
         self.worker = TranscriptionWorker(self.transcription_audio_file, selected_model, language)
         self.worker.log.connect(self.update_log)
-        self.worker.finished.connect(self.transcription_finished)
+        self.worker.transcription_ready.connect(self.transcription_finished)
         self.worker.start()
 
     def update_log(self, message):
@@ -1070,7 +1077,7 @@ class WhisperApp(QMainWindow):
             self.recording_file = tempfile.mktemp(suffix='.wav')
             self.recorder = AudioRecorder()
             self.recorder.setup_recording(self.recording_file)
-            self.recorder.finished.connect(self.recording_finished)
+            self.recorder.recording_finished.connect(self.recording_finished)
             self.recorder.start()
             # Start the recording timer
             self.start_time = datetime.datetime.now()

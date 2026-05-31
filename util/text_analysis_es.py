@@ -86,8 +86,8 @@ SPANISH_DATA = {
 }
 
 class SpanishTextAnalysis(BaseTextAnalysis, QObject):
-    # Signal emitted when the model has been loaded
-    model_loaded = pyqtSignal()
+    # Emitted when the spaCy model has finished loading
+    model_loaded: pyqtSignal = pyqtSignal()
 
     def __init__(self):
         BaseTextAnalysis.__init__(self, "es_core_news_sm", SPANISH_DATA)

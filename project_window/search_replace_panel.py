@@ -70,7 +70,8 @@ def find_next_non_space_char(plain_content, position):
 
 class UndoButton(QPushButton):
     """Custom button for undo action in tree items."""
-    clicked_with_item = pyqtSignal(QTreeWidgetItem)  # Signal to pass the associated item
+    # Emitted with (item: QTreeWidgetItem)
+    clicked_with_item: pyqtSignal = pyqtSignal(QTreeWidgetItem)  # Signal to pass the associated item
 
     def __init__(self, item, tint_color):
         super().__init__()

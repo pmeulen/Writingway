@@ -22,7 +22,7 @@ class SummaryService(QObject):
                 self.worker = LLMWorker("", {})  # Create with dummy params
                 print(f"DEBUG: Created single LLMWorker: {id(self.worker)}")
                 self.worker.data_received.connect(self._on_data_received)
-                self.worker.finished.connect(self._on_finished)
+                self.worker.stream_finished.connect(self._on_finished)
 
             # Reset worker state
             if self.worker.isRunning():
@@ -67,7 +67,7 @@ class SummaryService(QObject):
                 self.worker.wait(2000)
             try:
                 self.worker.data_received.disconnect()
-                self.worker.finished.disconnect()
+                self.worker.stream_finished.disconnect()
                 print(f"DEBUG: Disconnected signals for worker {worker_id}")
             except TypeError:
                 print(f"DEBUG: Signals already disconnected for worker {worker_id}")

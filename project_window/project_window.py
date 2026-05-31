@@ -540,7 +540,7 @@ class ProjectWindow(QMainWindow):
         self.stop_llm()
         self.worker = LLMWorker(final_prompt, overrides)
         self.worker.data_received.connect(self.update_text)
-        self.worker.finished.connect(self.on_finished)
+        self.worker.stream_finished.connect(self.on_finished)
         self.worker.token_limit_exceeded.connect(self.handle_token_limit_error)
         self.worker.start()
 
@@ -574,8 +574,8 @@ class ProjectWindow(QMainWindow):
         self.bottom_stack.preview_text.setReadOnly(True)
         self.worker = LLMWorker(final_prompt, prose_config)
         self.worker.data_received.connect(self.update_text)
-        self.worker.finished.connect(self.on_finished)
-        self.worker.finished.connect(self.cleanup_worker)
+        self.worker.stream_finished.connect(self.on_finished)
+        self.worker.stream_finished.connect(self.cleanup_worker)
         self.worker.token_limit_exceeded.connect(self.show_token_limit_dialog)
         self.worker.start()
 
@@ -621,7 +621,7 @@ class ProjectWindow(QMainWindow):
                 try:
                     logging.debug(f"Disconnecting signals for worker {worker_id}")
                     self.worker.data_received.disconnect()
-                    self.worker.finished.disconnect()
+                    self.worker.stream_finished.disconnect()
                     self.worker.token_limit_exceeded.disconnect()
                 except TypeError as e:
                     logging.debug(f"Signal disconnection error for worker {worker_id}: {e}")
