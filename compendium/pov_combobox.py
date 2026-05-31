@@ -85,6 +85,7 @@ class POVComboBox(QComboBox):
             self.clear()
             # <none> first - grayed out like a disabled menu item (uses palette, not hardcoded)
             self.addItem(_("<none>"))
+            self.setItemData(0, POVItemData(uuid=NONE_CHARACTER_UUID, kind="none"), Qt.ItemDataRole.UserRole)
 
             for i, entry in enumerate(self.compendium.list_pov_characters(), start=1):
                 self.addItem(entry["name"])
