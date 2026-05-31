@@ -65,6 +65,7 @@ def test_move_entry_rebuilds_tree_and_reselects_entry(isolated_cwd, qtbot, monke
 
 import json
 from pathlib import Path
+
 from PyQt5.QtCore import QPoint
 from PyQt5.QtWidgets import QMessageBox
 

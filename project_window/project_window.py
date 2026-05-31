@@ -55,7 +55,6 @@ from .rewrite_feature import RewriteDialog
 from .scene_editor import SceneEditor
 from .search_replace_panel import SearchReplacePanel
 from .token_limit_dialog import TokenLimitDialog
-import muse.prompt_handler as prompt_handler
 
 pyqt_dir = os.path.dirname(PyQt5.__file__)
 possible_paths = [

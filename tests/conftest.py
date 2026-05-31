@@ -12,8 +12,6 @@ This conftest.py is placed at the repo root so that all sub-packages under
   temporary project directory.
 """
 
-import json
-import os
 import pytest
 
 # ---------------------------------------------------------------------------

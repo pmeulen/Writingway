@@ -8,11 +8,11 @@ never touch the real ``Projects/`` tree.
 
 import json
 import os
-import pytest
 from unittest.mock import MagicMock, patch
 
-from compendium.compendium_manager import CompendiumManager, CompendiumEventBus
+import pytest
 
+from compendium.compendium_manager import CompendiumEventBus, CompendiumManager
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -20,7 +20,7 @@ from compendium.compendium_manager import CompendiumManager, CompendiumEventBus
 
 def _read_raw(manager: CompendiumManager) -> dict:
     """Read the compendium JSON file directly and return the raw dict."""
-    with open(manager._filepath, "r", encoding="utf-8") as f:
+    with open(manager._filepath, encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -34,7 +34,7 @@ class TestFactories:
         entry = CompendiumManager.make_empty_entry("Alice", "A brave hero.")
         assert entry["name"] == "Alice"
         assert entry["content"] == "A brave hero."
-        assert "uuid" in entry and entry["uuid"]
+        assert entry.get("uuid")
         assert entry["details"] == ""
         assert entry["tags"] == []
         assert entry["relationships"] == []
@@ -50,7 +50,7 @@ class TestFactories:
     def test_make_empty_category_has_required_fields(self):
         cat = CompendiumManager.make_empty_category("Characters")
         assert cat["name"] == "Characters"
-        assert "uuid" in cat and cat["uuid"]
+        assert cat.get("uuid")
         assert cat["entries"] == []
 
     @pytest.mark.unit
@@ -613,9 +613,8 @@ class TestBackupCompendiumData:
 
     @pytest.mark.integration
     def test_backup_raises_ioerror_on_copy_failure(self, compendium_manager):
-        with patch("shutil.copy2", side_effect=OSError("disk full")):
-            with pytest.raises(IOError):
-                compendium_manager._backup_compendium_data()
+        with patch("shutil.copy2", side_effect=OSError("disk full")), pytest.raises(IOError):
+            compendium_manager._backup_compendium_data()
 
 
 # ===========================================================================

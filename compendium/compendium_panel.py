@@ -14,10 +14,8 @@ from settings.llm_api_aggregator import WWApiAggregator
 from settings.llm_settings_dialog import LLMSettingsDialog
 from settings.settings_manager import WWSettingsManager
 from settings.theme_manager import ThemeManager
-from settings.llm_settings_dialog import LLMSettingsDialog
-from compendium.compendium_manager import CompendiumManager, CompendiumEventBus
-from .ai_compendium_dialog import AICompendiumDialog
 
+from .ai_compendium_dialog import AICompendiumDialog
 
 DEBUG = False
 

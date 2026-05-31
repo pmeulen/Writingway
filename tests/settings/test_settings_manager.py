@@ -7,11 +7,11 @@ from the real ``settings.json`` on disk.
 
 import copy
 import json
-import pytest
 from pathlib import Path
 
-from settings.settings_manager import SettingsManager
+import pytest
 
+from settings.settings_manager import SettingsManager
 
 # ---------------------------------------------------------------------------
 # Fixture: a fresh SettingsManager backed by a temp file

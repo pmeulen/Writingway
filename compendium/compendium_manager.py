@@ -6,8 +6,9 @@ from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
 
-from settings.settings_manager import WWSettingsManager
 from PyQt5.QtWidgets import QMessageBox
+
+from settings.settings_manager import WWSettingsManager
 
 
 class CompendiumEventBus:
@@ -88,7 +89,7 @@ class CompendiumManager:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def make_empty_entry(name: str, content: str = "") -> Dict[str, Any]:
+    def make_empty_entry(name: str, content: str = "") -> dict[str, Any]:
         """Return a new, fully-initialised entry dict in the unified format.
 
         All callers that need to create an entry should use this factory so
@@ -108,7 +109,7 @@ class CompendiumManager:
         }
 
     @staticmethod
-    def make_empty_category(name: str) -> Dict[str, Any]:
+    def make_empty_category(name: str) -> dict[str, Any]:
         """Return a new, fully-initialised category dict.
 
         Returns:
@@ -179,7 +180,7 @@ class CompendiumManager:
             # copy2 preserves metadata where possible
             shutil.copy2(self._filepath, backup_path)
         except Exception as e:
-            raise IOError(f"Failed to backup compendium file {self._filepath} to {backup_path}: {e}") from e
+            raise OSError(f"Failed to backup compendium file {self._filepath} to {backup_path}: {e}") from e
 
         return backup_path
 
@@ -460,7 +461,7 @@ class CompendiumManager:
     # Query methods
     # ------------------------------------------------------------------
 
-    def list_categories(self) -> List[Dict[str, str]]:
+    def list_categories(self) -> list[dict[str, str]]:
         """Return a summary list of all categories.
 
         Returns:
@@ -470,7 +471,7 @@ class CompendiumManager:
         return [{"name": cat.get("name", ""), "uuid": cat.get("uuid", "")}
                 for cat in data.get("categories", [])]
 
-    def get_category_by_uuid(self, category_uuid: str) -> Optional[Dict[str, Any]]:
+    def get_category_by_uuid(self, category_uuid: str) -> dict[str, Any] | None:
         """Return the full category dict (including its ``entries`` list) for *category_uuid*.
 
         Returns:
@@ -482,7 +483,7 @@ class CompendiumManager:
                 return cat
         return None
 
-    def list_entries(self, category_uuid: str) -> List[Dict[str, Any]]:
+    def list_entries(self, category_uuid: str) -> list[dict[str, Any]]:
         """Return all entry dicts for the category identified by *category_uuid*.
 
         Returns:
@@ -491,7 +492,7 @@ class CompendiumManager:
         cat = self.get_category_by_uuid(category_uuid)
         return cat.get("entries", []) if cat else []
 
-    def get_entry_by_uuid(self, entry_uuid: str) -> Optional[Dict[str, Any]]:
+    def get_entry_by_uuid(self, entry_uuid: str) -> dict[str, Any] | None:
         """Return the entry dict whose ``uuid`` matches *entry_uuid*, or ``None``."""
         data = self._load_data()
         for cat in data.get("categories", []):
@@ -500,7 +501,7 @@ class CompendiumManager:
                     return entry
         return None
 
-    def find_categories(self, search_text: str = "") -> Dict[str, Dict[str, Any]]:
+    def find_categories(self, search_text: str = "") -> dict[str, dict[str, Any]]:
         """Return categories whose name contains *search_text*, keyed by UUID.
 
         An empty *search_text* returns every category.  Each value is a summary
@@ -511,7 +512,7 @@ class CompendiumManager:
         """
         lower = search_text.lower()
         data = self._load_data()
-        results: Dict[str, Dict[str, Any]] = {}
+        results: dict[str, dict[str, Any]] = {}
         for cat in data.get("categories", []):
             cat_name = cat.get("name", "")
             if not lower or lower in cat_name.lower():
@@ -519,7 +520,7 @@ class CompendiumManager:
                 results[uuid] = {"name": cat_name, "uuid": uuid}
         return results
 
-    def find_entries(self, search_text: str = "") -> Dict[str, Dict[str, Any]]:
+    def find_entries(self, search_text: str = "") -> dict[str, dict[str, Any]]:
         """Return entries whose name or tag names contain *search_text*, keyed by UUID.
 
         An empty *search_text* returns every entry.  Each value contains all
@@ -531,7 +532,7 @@ class CompendiumManager:
         """
         lower = search_text.lower()
         data = self._load_data()
-        results: Dict[str, Dict[str, Any]] = {}
+        results: dict[str, dict[str, Any]] = {}
         for cat in data.get("categories", []):
             cat_name = cat.get("name", "")
             cat_uuid = cat.get("uuid", "")
@@ -582,7 +583,7 @@ class CompendiumManager:
 
     # --- Categories ---
 
-    def add_category(self, name: str) -> Dict[str, Any]:
+    def add_category(self, name: str) -> dict[str, Any]:
         """Create and persist a new category.
 
         Returns:
@@ -624,7 +625,7 @@ class CompendiumManager:
 
     # --- Entries ---
 
-    def add_entry(self, category_uuid: str, name: str, content: str = "") -> Optional[Dict[str, Any]]:
+    def add_entry(self, category_uuid: str, name: str, content: str = "") -> dict[str, Any] | None:
         """Add a new entry to the category identified by *category_uuid*.
 
         Returns:
@@ -655,7 +656,7 @@ class CompendiumManager:
                     return True
         return False
 
-    def update_entry(self, entry_uuid: str, fields: Dict[str, Any]) -> bool:
+    def update_entry(self, entry_uuid: str, fields: dict[str, Any]) -> bool:
         """Merge *fields* into the entry identified by *entry_uuid*.
 
         The ``uuid`` field is protected and cannot be changed via this method.
@@ -715,7 +716,7 @@ class CompendiumManager:
                 return True
         return False
 
-    def reorder_entries(self, category_uuid: str, ordered_uuids: List[str]) -> bool:
+    def reorder_entries(self, category_uuid: str, ordered_uuids: list[str]) -> bool:
         """Reorder the entries of the category identified by *category_uuid* to match
         *ordered_uuids*.
 
@@ -743,7 +744,7 @@ class CompendiumManager:
     # callers in other modules are updated to use UUID-based APIs.
     # ------------------------------------------------------------------
 
-    def get_category(self, category_name: str) -> List[Dict[str, str]]:
+    def get_category(self, category_name: str) -> list[dict[str, str]]:
         """[Legacy] Return entries for the first category whose name matches *category_name*.
 
         Prefer ``list_entries(category_uuid)`` for new code.
@@ -754,7 +755,7 @@ class CompendiumManager:
                 return cat.get("entries", [])
         return []
 
-    def get_characters(self) -> List[str]:
+    def get_characters(self) -> list[str]:
         """[Legacy] Return a list of character names from the 'Characters' category.
 
         NOTE: This returns names in the canonical order stored in the compendium

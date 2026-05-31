@@ -597,7 +597,7 @@ class ProjectStatistics:
 
         usage_by_category = {}
         unused_entries = {}
-        
+
         for cat_info in self.compendium_manager.list_categories():
             category_name = cat_info["name"]
             entries = self.compendium_manager.list_entries(category_name)
@@ -632,7 +632,7 @@ class ProjectStatistics:
     def get_compendium_entries(self, category):
         """Return entry names for *category* via the manager."""
         return [e.get("name", "") for e in self.compendium_manager.list_entries(category) if e.get("name")]
-    
+
 class StatisticsChart(QChartView):
     """
     Custom chart view for displaying statistics charts.
