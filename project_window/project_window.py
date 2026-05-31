@@ -848,8 +848,9 @@ class ProjectWindow(QMainWindow):
         except Exception as e:
             print(f"Error loading characters from compendium: {e}")
         if not characters:
-            characters = ["Alice", "Bob", "Charlie"]
-        characters.append(_("Custom..."))
+            # No characters available
+            characters = [_("<none>")]
+        characters.append(_("New...")) # Selecting this "character" adds a new character
         self.bottom_stack.pov_character_combo.blockSignals(True)
         self.bottom_stack.pov_character_combo.clear()
         self.bottom_stack.pov_character_combo.addItems(characters)
@@ -861,14 +862,14 @@ class ProjectWindow(QMainWindow):
         if index >= 0:
             combo.setCurrentIndex(index)
         else:
-            if combo.count() == 2 and combo.itemText(0) != _("Custom..."):
+            if combo.count() == 2 and combo.itemText(0) != _("New..."):
                 combo.setCurrentIndex(0)
             elif combo.count() > previous_index: # possibly renamed character
                 combo.blockSignals(True)
                 combo.setCurrentIndex(previous_index)
                 combo.blockSignals(False)
             else:
-                combo.setCurrentIndex(combo.findText(_("Custom...")))
+                combo.setCurrentIndex(combo.findText(_("New...")))
 
     def update_icons(self):
         tint_str = ThemeManager.ICON_TINTS.get(self.current_theme, "black")

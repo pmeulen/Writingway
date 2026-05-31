@@ -56,8 +56,8 @@ class POVComboBox(QComboBox):
 
     def handle_pov_character_change(self, index=0):
         value = self.currentText()
-        if value == _("Custom..."):
-            dialog = CustomPOVDialog(self)
+        if value == _("New..."):
+            dialog = NewCharacterDialog(self)
             if dialog.exec_() == QDialog.Accepted:
                 name, description = dialog.get_data()
 
@@ -137,11 +137,11 @@ class POVComboBox(QComboBox):
         """Public API for other classes to get current selection."""
         return self.selected_pov if self.selected_pov != _("Custom...") else self.currentText()
 
-class CustomPOVDialog(QDialog):
-    """Dialog for entering a custom POV character name and description."""
+class NewCharacterDialog(QDialog):
+    """Dialog for entering a compendium character name and description."""
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(_("Custom POV Character"))
+        self.setWindowTitle(_("Add new Character"))
         self.setModal(True)
         layout = QVBoxLayout(self)
 
@@ -170,7 +170,7 @@ class CustomPOVDialog(QDialog):
 
     def ok_button_pressed(self):
         if not self.name_input.text().strip():
-            QMessageBox.warning(self, _("Custom POV Character"), _("Character name cannot be empty."))
+            QMessageBox.warning(self, _("Add new Character"), _("Character name cannot be empty."))
             return
         self.accept()
 
