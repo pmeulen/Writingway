@@ -1,5 +1,6 @@
 import json
 import os
+import os.path as osp
 import re
 from difflib import SequenceMatcher
 
@@ -585,7 +586,7 @@ class SmartQAWidget(QWidget):
     def on_qa_pdf_path_changed(self):
         path = self.qa_pdf_path_edit.text().strip()
         supported_extensions = ['.pdf', '.epub', '.docx', '.txt', '.md', '.html']
-        is_valid_file = any(path.lower().endswith(ext) for ext in supported_extensions) and os.path.isfile(path)
+        is_valid_file = any(path.lower().endswith(ext) for ext in supported_extensions) and osp.isfile(path)
         self.qa_process_btn.setEnabled(is_valid_file)
         self.qa_search_btn.setEnabled(False)
 
@@ -593,7 +594,7 @@ class SmartQAWidget(QWidget):
             self.qa_status_label.setText("No document loaded")
             self.qa_status_label.setStyleSheet("color: #888888; font-style: italic;")
         elif is_valid_file:
-            self.qa_status_label.setText(f"Ready to process: {os.path.basename(path)}")
+            self.qa_status_label.setText(f"Ready to process: {osp.basename(path)}")
             self.qa_status_label.setStyleSheet("color: #006400; font-style: normal;")
             self.load_qa_pdf_info()
         else:

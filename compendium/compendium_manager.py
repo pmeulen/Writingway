@@ -255,10 +255,7 @@ class CompendiumManager:
 
         # Ensure essential keys exist with a stable shape.
         categories_raw = data.get("categories")
-        if categories_raw is None:
-            data["categories"] = []
-            changed = True
-        elif not isinstance(categories_raw, (list, dict)):
+        if categories_raw is None or not isinstance(categories_raw, (list, dict)):
             data["categories"] = []
             changed = True
 
@@ -808,6 +805,61 @@ class CompendiumManager:
             if cat.get("name") == category_name:
                 return cat.get("entries", [])
         return []
+
+    def list_pov_characters(self) -> list[dict[str, str]]:
+        """Return a list of POV character summaries from the 'Characters' category.
+
+        Returns:
+            list of ``{"uuid": str, "name": str}`` dicts in canonical compendium order.
+            Empty list if the 'Characters' category does not exist or has no entries.
+        """
+        data = self._load_data()
+        for cat in data.get("categories", []):
+            if cat.get("name", "").lower() == "characters":
+                return [
+                    {"uuid": e.get("uuid", ""), "name": e.get("name", "")}
+                    for e in cat.get("entries", [])
+                ]
+        return []
+
+    def add_pov_character(self, name: str, description: str = "") -> dict[str, Any]:
+        """Upsert a POV character into the 'Characters' category.
+
+        If a 'Characters' category does not exist it is created. If an entry with
+        *name* already exists its description is updated and the full entry dict is
+        returned. Otherwise a new entry is created and returned.
+
+        Returns:
+            The full entry dict (including ``uuid``) for the upserted character.
+        """
+        data = self._load_data()
+
+        # Find or create the Characters category.
+        characters_cat: dict[str, Any] | None = None
+        for cat in data.get("categories", []):
+            if cat.get("name", "").lower() == "characters":
+                characters_cat = cat
+                break
+        if characters_cat is None:
+            characters_cat = self.make_empty_category("Characters")
+            data.setdefault("categories", []).append(characters_cat)
+
+        # Update existing entry or create a new one.
+        for entry in characters_cat.get("entries", []):
+            if entry.get("name") == name:
+                entry["content"] = description
+                entry.setdefault("uuid", str(uuid4()))
+                entry.setdefault("details", "")
+                entry.setdefault("tags", [])
+                entry.setdefault("relationships", [])
+                entry.setdefault("images", [])
+                self._save_data(data)
+                return entry
+
+        new_entry = self.make_empty_entry(name, description)
+        characters_cat.setdefault("entries", []).append(new_entry)
+        self._save_data(data)
+        return new_entry
 
     def get_characters(self) -> list[str]:
         """[Legacy] Return a list of character names from the 'Characters' category.

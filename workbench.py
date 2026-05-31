@@ -3,6 +3,7 @@ import os
 import random
 import shutil
 from gettext import gettext as _
+from typing import Any, TypedDict
 
 from PyQt5.QtCore import QSize, Qt, pyqtSignal
 from PyQt5.QtGui import QIcon, QPixmap
@@ -36,7 +37,68 @@ LAST_DISPLAYED_KEY = "last_displayed_project"
 # Load version display
 VERSION_FILE = "version.json"
 
-def load_version():
+
+class ProjectRecord(TypedDict):
+    name: str
+    cover: str | None
+
+
+class ProjectsData(TypedDict):
+    projects: list[ProjectRecord]
+    last_displayed_project: str | None
+
+
+def _normalize_project_record(raw: Any) -> ProjectRecord | None:
+    if not isinstance(raw, dict):
+        return None
+    raw_name = raw.get("name")
+    name = str(raw_name).strip() if raw_name is not None else ""
+    if not name:
+        return None
+    raw_cover = raw.get("cover")
+    cover = raw_cover if isinstance(raw_cover, str) and raw_cover else None
+    project_record: ProjectRecord = {"name": name, "cover": cover}
+    return project_record
+
+
+def _normalize_projects_data(raw: Any) -> ProjectsData:
+    default_data: ProjectsData = {
+        "projects": [
+            {"name": "My First Project", "cover": None},
+            {"name": "Sci-Fi Epic", "cover": None},
+            {"name": "Mystery Novel", "cover": None},
+        ],
+        "last_displayed_project": None,
+    }
+    if isinstance(raw, list):
+        normalized_projects = [
+            project for project in (_normalize_project_record(item) for item in raw)
+            if project is not None
+        ]
+        projects_data: ProjectsData = {
+            "projects": normalized_projects,
+            "last_displayed_project": None,
+        }
+        return projects_data
+    if not isinstance(raw, dict):
+        return default_data
+
+    raw_projects = raw.get("projects", [])
+    projects_iterable = raw_projects if isinstance(raw_projects, list) else []
+    normalized_projects = [
+        project for project in (_normalize_project_record(item) for item in projects_iterable)
+        if project is not None
+    ]
+
+    last_displayed_raw = raw.get(LAST_DISPLAYED_KEY)
+    last_displayed = last_displayed_raw if isinstance(last_displayed_raw, str) and last_displayed_raw else None
+    projects_data: ProjectsData = {
+        "projects": normalized_projects,
+        "last_displayed_project": last_displayed,
+    }
+    return projects_data
+
+def load_version() -> dict[str, Any]:
     """Load version data from the version JSON file."""
     if os.path.exists(VERSION_FILE):
         try:
@@ -50,35 +112,25 @@ def load_version():
 # Load settings at module level.
 VERSION = load_version()
 
-def load_projects():
+def load_projects() -> ProjectsData:
     """Load project data from a JSON file. If the file does not exist, return default projects."""
     filepath = os.path.join(os.getcwd(), "Projects", PROJECTS_FILE)
     if not os.path.exists(filepath):
         oldpath = os.path.join(os.getcwd(), PROJECTS_FILE) # backward compatibility
         if os.path.exists(oldpath):
             os.rename(oldpath, filepath)
-    default_data = {
-        "projects": [
-            {"name": "My First Project", "cover": None},
-            {"name": "Sci-Fi Epic", "cover": None},
-            {"name": "Mystery Novel", "cover": None},
-        ],
-        LAST_DISPLAYED_KEY: None
-    }
+    default_data = _normalize_projects_data(None)
     if os.path.exists(filepath):
         try:
             with open(filepath, encoding="utf-8") as f:
                 data = json.load(f)
-                # Ensure compatibility with older files
-                if isinstance(data, list):
-                    return {LAST_DISPLAYED_KEY: None, "projects": data}
-                return data
+                return _normalize_projects_data(data)
         except Exception as e:
             QMessageBox.warning(None, _("Load Projects Error"),
                                 _("Error loading projects: {}").format(str(e)))
     return default_data
 
-def save_projects(projects):
+def save_projects(projects: ProjectsData) -> None:
     """Save the project data to a JSON file."""
     filepath = os.path.join(os.getcwd(), "Projects", PROJECTS_FILE)
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
@@ -91,7 +143,7 @@ def save_projects(projects):
 
 # Load projects at module level with the new structure
 PROJECTS_DATA = load_projects()
-PROJECTS = PROJECTS_DATA["projects"]
+PROJECTS: list[ProjectRecord] = PROJECTS_DATA["projects"]
 
 class ProjectPostIt(QToolButton):
     """
@@ -100,7 +152,7 @@ class ProjectPostIt(QToolButton):
     Right-click shows a context menu with options.
     """
 
-    def __init__(self, project, parent=None):
+    def __init__(self, project: ProjectRecord, parent=None):
         super().__init__(parent)
         self.project = project
         self.setup_ui()
@@ -255,7 +307,8 @@ class ProjectPostIt(QToolButton):
             if settings:
                 project_settings_manager.save_project_settings(newname, settings, PROJECTS)
             workbench = self.window()
-            workbench.load_covers()
+            if hasattr(workbench, "load_covers"):
+                workbench.load_covers()
             QMessageBox.information(self,
                 _("Rename Project"), _("Project {} renamed to '{}'").format(oldname, newname))
 
@@ -273,15 +326,17 @@ class ProjectPostIt(QToolButton):
         self.rename_project_dir_contents(old_dirname, new_dirname, old_name, new_name)
 
     def rename_project_dir_contents(self, old_dirname, new_dirname, old_name, new_name):
+        old_dirname = str(old_dirname)
+        new_dirname = str(new_dirname)
         os.mkdir(new_dirname)
         for filename in os.listdir(old_dirname):
-            old_path = os.path.join(old_dirname, filename)
+            old_path = str(os.path.join(old_dirname, filename))
             if filename.startswith(old_name):
                 remainder = filename[len(old_name):]
                 new_filename = new_name + remainder
-                new_path = os.path.join(new_dirname, new_filename)
+                new_path = str(os.path.join(new_dirname, new_filename))
             else:
-                new_path = os.path.join(new_dirname, filename)
+                new_path = str(os.path.join(new_dirname, filename))
             shutil.copy2(old_path, new_path)
         shutil.rmtree(old_dirname)
 
@@ -290,7 +345,7 @@ class ProjectPostIt(QToolButton):
         if cover:
             filename = os.path.basename(cover)
             new_filepath = WWSettingsManager.get_project_path(new_name, filename)
-            self.project["cover"] = os.path.relpath(new_filepath)
+            self.project["cover"] = str(os.path.relpath(new_filepath))
 
 class ProjectCoverWidget(QWidget):
     """
@@ -299,7 +354,7 @@ class ProjectCoverWidget(QWidget):
     # Emitted with (project_name: str)
     openProject: pyqtSignal = pyqtSignal(str)
 
-    def __init__(self, project, parent=None):
+    def __init__(self, project: ProjectRecord, parent=None):
         super().__init__(parent)
         self.project = project
         self.init_ui()
@@ -638,7 +693,7 @@ class WorkbenchWindow(QMainWindow):
                 QMessageBox.warning(self, _("New Project"),
                                     _("Project '{}' already exists.").format(name))
                 return
-            new_project = {"name": name.strip(), "cover": None}
+            new_project: ProjectRecord = {"name": name.strip(), "cover": None}
             PROJECTS.append(new_project)
             PROJECTS_DATA[LAST_DISPLAYED_KEY] = name.strip()
             save_projects(PROJECTS_DATA)

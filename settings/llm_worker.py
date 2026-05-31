@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 
 from PyQt5.QtCore import QThread, pyqtSignal
 
@@ -7,13 +8,18 @@ from .llm_api_aggregator import WWApiAggregator
 
 class LLMWorker(QThread):
     # Emitted for each chunk of data received from streaming LLM
-    data_received: pyqtSignal = pyqtSignal(str)
+    data_received = pyqtSignal(str)
     # Emitted when streaming is finished
-    stream_finished: pyqtSignal = pyqtSignal()
+    stream_finished = pyqtSignal()
     # Emitted when the LLM reports a token limit error (message)
-    token_limit_exceeded: pyqtSignal = pyqtSignal(str)
+    token_limit_exceeded = pyqtSignal(str)
 
-    def __init__(self, prompt: str, overrides: dict | None = None, conversation_history: list | None = None):
+    def __init__(
+        self,
+        prompt: str,
+        overrides: dict[str, Any] | None = None,
+        conversation_history: list[dict[str, str]] | None = None,
+    ) -> None:
         super().__init__()
         self.prompt = prompt
         self.overrides = overrides
@@ -21,7 +27,7 @@ class LLMWorker(QThread):
         self._is_running = True  # Flag to control thread execution
         logging.debug(f"LLMWorker created: {id(self)}")
 
-    def run(self):
+    def run(self) -> None:
         logging.debug(f"LLMWorker started: {id(self)}")
         try:
             i = 0  # Initialize chunk counter
@@ -47,7 +53,7 @@ class LLMWorker(QThread):
         finally:
             logging.debug(f"LLMWorker finished: {id(self)}")
 
-    def stop(self):
+    def stop(self) -> None:
         logging.debug(f"LLMWorker stopped: {id(self)}")
         try:
             self._is_running = False  # Signal the thread to stop
@@ -56,14 +62,14 @@ class LLMWorker(QThread):
             logging.error(f"Error in LLMWorker.stop: {e}", exc_info=True)
             raise
 
-    def is_auth_error(self, response):
+    def is_auth_error(self, response: Any) -> bool:
         """Check if the response indicates an authentication error."""
         error_text = str(response).lower()
         return any(phrase in error_text for phrase in [
             "invalid jwt", "token-invalid", "authentication error", "signed-out"
         ])
 
-    def is_token_limit_error(self, response):
+    def is_token_limit_error(self, response: Any) -> bool:
         error_text = str(response).lower()
         return any(phrase in error_text for phrase in [
             "too many tokens", "exceeds token limit", "max tokens", "context length"

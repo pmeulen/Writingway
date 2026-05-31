@@ -14,6 +14,7 @@ from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 from langchain_together import ChatTogether
 from pydantic import ValidationError
+from requests import Response
 
 from .settings_manager import WWSettingsManager
 
@@ -306,7 +307,7 @@ class GeminiProvider(LLMProviderBase):
             timeout=self.get_timeout(overrides)
         )
 
-    def _do_models_request(self, url: str, headers: dict[str, str] = None) -> list[str]:
+    def _do_models_request(self, url: str, headers: dict[str, str] = None) -> Response:
         """Send a request to the provider to fetch available models."""
         api_key = self.get_api_key()
         if not api_key:

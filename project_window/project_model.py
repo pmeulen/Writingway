@@ -35,7 +35,7 @@ class ProjectModel(QObject):
         settings = psm.load_project_settings(self.project_name)
         return {
             "global_pov": settings.get("global_pov", _("Third Person Limited")),
-            "global_pov_character": settings.get("global_pov_character", _("Character")),
+            "global_pov_character": settings.get("global_pov_character", ""),
             "global_tense": settings.get("global_tense", _("Present Tense"))
         }
 

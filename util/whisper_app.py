@@ -8,6 +8,7 @@ import tempfile
 import time
 import warnings
 import wave
+from pathlib import Path
 
 import noisereduce as nr
 import numpy as np
@@ -277,7 +278,9 @@ class TranscriptionHistoryDialog(QDialog):
                 self.history_data.remove(item_to_delete)
 
             self.populate_history_list()
-            self.parent().save_history()
+            parent_widget = self.parent()
+            if parent_widget and hasattr(parent_widget, "save_history"):
+                parent_widget.save_history()
 
 # -------------------------- Audio Recorder Thread --------------------------
 class AudioRecorder(QThread):
@@ -378,7 +381,8 @@ class AudioSeparationWorker(QThread):
                 raise FileNotFoundError(f"Could not find vocals file at {vocals_file}")
 
             # Convert MP3 to WAV for further processing
-            vocals_wav = tempfile.mktemp(suffix=".wav")
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+                vocals_wav = temp_file.name
             audio = AudioSegment.from_mp3(vocals_file)
             audio.export(vocals_wav, format="wav")
 
@@ -446,7 +450,16 @@ class WhisperApp(QMainWindow):
 
     def check_ffmpeg(self):
         """Check if FFmpeg is installed and accessible."""
-        return shutil.which("ffmpeg") is not None
+        try:
+            subprocess.run(
+                ["ffmpeg", "-version"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return True
+        except OSError:
+            return False
 
     def setup_ui(self):
         """Set up the main window UI components."""
@@ -695,10 +708,9 @@ class WhisperApp(QMainWindow):
 
     def setup_history(self):
         """Initialize transcription history from a JSON file in the main assets folder."""
-        assets_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
-        if not os.path.exists(assets_dir):
-            os.makedirs(assets_dir)
-        self.history_file = os.path.join(assets_dir, "whisper_history.json")
+        assets_dir = Path(__file__).resolve().parent.parent / "assets"
+        assets_dir.mkdir(exist_ok=True)
+        self.history_file = str(assets_dir / "whisper_history.json")
         if os.path.exists(self.history_file):
             try:
                 with open(self.history_file, encoding='utf-8') as f:
@@ -847,7 +859,7 @@ class WhisperApp(QMainWindow):
 
     def toggle_playback(self):
         """Toggle between play and pause states."""
-        if self.player.state() == QMediaPlayer.PlaybackState.PlayingState:
+        if self.player.state() == QMediaPlayer.PlayingState:
             self.player.pause()
         else:
             self.player.play()
@@ -872,7 +884,7 @@ class WhisperApp(QMainWindow):
 
     def handle_player_state_changed(self, state):
         """Update the play button icon based on media state."""
-        if state == QMediaPlayer.PlaybackState.PlayingState:
+        if state == QMediaPlayer.PlayingState:
             self.btn_play.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
         else:
             self.btn_play.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
@@ -933,7 +945,8 @@ class WhisperApp(QMainWindow):
                     self.log_text.append(f"Applying band pass filter (range: {low_band} Hz - {high_band} Hz)...")
                     audio = audio.high_pass_filter(low_band)
                     audio = audio.low_pass_filter(high_band)
-            processed_file = tempfile.mktemp(suffix=".wav")
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+                processed_file = temp_file.name
             audio.export(processed_file, format="wav")
             self.log_text.append("Audio processing completed.")
             return processed_file
@@ -1074,7 +1087,8 @@ class WhisperApp(QMainWindow):
             self.btn_record.setText("Stop Recording")
             self.btn_record.setIcon(ThemeManager.get_tinted_icon("assets/icons/stop-circle.svg"))
             self.btn_pause_record.setEnabled(True)
-            self.recording_file = tempfile.mktemp(suffix='.wav')
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
+                self.recording_file = temp_file.name
             self.recorder = AudioRecorder()
             self.recorder.setup_recording(self.recording_file)
             self.recorder.recording_finished.connect(self.recording_finished)

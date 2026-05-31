@@ -1,6 +1,7 @@
 ## file: audio_utils.py
 import datetime
 import wave
+from typing import Any
 
 import pyaudio
 import whisper
@@ -10,20 +11,20 @@ from PyQt5.QtCore import QThread, pyqtSignal
 class AudioRecorder(QThread):
     recording_finished = pyqtSignal(str)
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.is_recording = False
         self.is_paused = False
         self.output_file = ""
         self.start_time = None
 
-    def setup_recording(self, output_file):
+    def setup_recording(self, output_file: str) -> None:
         self.output_file = output_file
         self.is_recording = True
         self.is_paused = False
         self.start_time = datetime.datetime.now()
 
-    def run(self):
+    def run(self) -> None:
         FORMAT = pyaudio.paInt16
         CHANNELS = 1
         RATE = 16000
@@ -52,28 +53,28 @@ class AudioRecorder(QThread):
             wf.close()
             self.recording_finished.emit(self.output_file)
 
-    def stop_recording(self):
+    def stop_recording(self) -> None:
         self.is_recording = False
 
-    def pause(self):
+    def pause(self) -> None:
         self.is_paused = True
 
-    def resume(self):
+    def resume(self) -> None:
         self.is_paused = False
 
 class TranscriptionWorker(QThread):
     transcription_ready = pyqtSignal(str)
 
-    def __init__(self, file_path, model_name="tiny", language=None):
+    def __init__(self, file_path: str, model_name: str = "tiny", language: str | None = None) -> None:
         super().__init__()
         self.file_path = file_path
         self.model_name = model_name
         self.language = language
 
-    def run(self):
+    def run(self) -> None:
         try:
             model = whisper.load_model(self.model_name)
-            result = model.transcribe(self.file_path, language=self.language)
-            self.transcription_ready.emit(result["text"])
+            result: dict[str, Any] = model.transcribe(audio=self.file_path, language=self.language)
+            self.transcription_ready.emit(str(result.get("text", "")))
         except Exception as e:
             self.transcription_ready.emit(f"Error: {e!s}")

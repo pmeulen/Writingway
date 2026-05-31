@@ -187,8 +187,8 @@ class BottomStack(QWidget):
         pulldown_layout.setContentsMargins(0, 0, 20, 0)
         pulldown_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
 
-        self.pov_character_combo = POVComboBox(self.model.project_name, initial_pov=self.model.settings.get("global_pov_character", "Character"))
-        self.pov_character_combo.currentTextChanged.connect(self.handle_pov_character_change)
+        self.pov_character_combo = POVComboBox(self.model.project_name, initial_uuid=self.model.settings.get("global_pov_character", ""))
+        self.pov_character_combo.pov_uuid_changed.connect(self.handle_pov_character_change)
         self.pov_combo = self.add_combo(pulldown_layout, _("POV"), [_("First Person"), _("Third Person Limited"), _("Omniscient"), _("Custom...")], self.controller.handle_pov_change)
         pulldown_layout.addRow(_("POV Character"), self.pov_character_combo)
         self.tense_combo = self.add_combo(pulldown_layout, _("Tense"), [_("Past Tense"), _("Present Tense"), _("Custom...")], self.controller.handle_tense_change)
@@ -218,10 +218,8 @@ class BottomStack(QWidget):
         layout.addRow(f"{label_text}:", combo)
         return combo
 
-    def handle_pov_character_change(self, text):
-        if text == _("Custom..."):
-            return
-        self.model.settings["global_pov_character"] = text
+    def handle_pov_character_change(self, uuid: str) -> None:
+        self.model.settings["global_pov_character"] = uuid
         self.model.save_settings()
         self.update_tooltips()
 
@@ -237,11 +235,11 @@ class BottomStack(QWidget):
         self.delete_summary_button.setIcon(ThemeManager.get_tinted_icon("assets/icons/trash.svg", tint_color))
         self.update_tooltips()
 
-    def update_tooltips(self):
+    def update_tooltips(self) -> None:
         if self.pov_combo:
             self.pov_combo.setToolTip(_("POV: {}").format(self.model.settings.get('global_pov', 'Third Person Limited')))
         if self.pov_character_combo:
-            self.pov_character_combo.setToolTip(_("POV Character: {}").format(self.model.settings.get('global_pov_character', 'Character')))
+            self.pov_character_combo.setToolTip(_("POV Character: {}").format(self.pov_character_combo.current_pov()))
         if self.tense_combo:
             self.tense_combo.setToolTip(_("Tense: {}").format(self.model.settings.get('global_tense', 'Present Tense')))
 
@@ -259,10 +257,10 @@ class BottomStack(QWidget):
             context_panel.setVisible(True)
             self.context_toggle_button.setIcon(ThemeManager.get_tinted_icon("assets/icons/book-open.svg"))
 
-    def get_additional_vars(self):
+    def get_additional_vars(self) -> dict[str, str]:
         return {
             "pov": self.pov_combo.currentText(),
-            "pov_character": self.pov_character_combo.currentText(),
+            "pov_character": self.pov_character_combo.current_pov(),
             "tense": self.tense_combo.currentText()
         }
 

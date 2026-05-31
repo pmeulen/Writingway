@@ -18,7 +18,7 @@ class ThemeManager(QObject):
     """
 
     # Signal emitted when theme changes: (theme_name: str)
-    themeChanged: pyqtSignal = pyqtSignal(str)
+    themeChanged = pyqtSignal(str)
 
     _instance = None
     _icon_cache = {}  # Cache: (file_path, tint_color) -> QIcon
@@ -40,14 +40,14 @@ class ThemeManager(QObject):
             }
     """
 
-    def __new__(cls):
+    def __new__(cls) -> "ThemeManager":
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
+            cls._instance = QObject.__new__(cls)
             # Initialize the QObject part
             cls._instance.__init_signals()
         return cls._instance
 
-    def __init_signals(self):
+    def __init_signals(self) -> None:
         # This ensures the QObject is properly initialized
         super().__init__()
 

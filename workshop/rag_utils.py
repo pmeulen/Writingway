@@ -5,7 +5,7 @@ import os
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import docx
 import ebooklib
@@ -47,14 +47,13 @@ class DocumentProcessor(ABC):
         pass
 
     @abstractmethod
-    def convert_to_markdown(self, file_path: str, pages_or_sections: list[int]) -> tuple[str, str | None]:
+    def convert_to_markdown(self, file_path: str, pages_or_sections: list[int] | None = None) -> tuple[str, str | None]:
         # Converts specified sections to markdown, returns markdown text and an optional error message
         pass
 
 # EPUB processor using ebooklib and BeautifulSoup
 class EpubProcessor(DocumentProcessor):
-    @staticmethod
-    def load_document(epub_path: str) -> tuple[int, str | None]:
+    def load_document(self, epub_path: str) -> tuple[int, str | None]:
         # Load EPUB and count chapters as sections
         try:
             book = epub.read_epub(epub_path)
@@ -63,8 +62,7 @@ class EpubProcessor(DocumentProcessor):
         except Exception as e:
             return 0, f"Error loading EPUB: {e}"
 
-    @staticmethod
-    def convert_to_markdown(epub_path: str, chapters: list[int] = None) -> tuple[str, str | None]:
+    def convert_to_markdown(self, epub_path: str, chapters: list[int] | None = None) -> tuple[str, str | None]:
         """
         For each chapter indicated:
         - parses the HTML
@@ -102,8 +100,7 @@ class EpubProcessor(DocumentProcessor):
 
 # DOCX processor using python-docx
 class DocxProcessor(DocumentProcessor):
-    @staticmethod
-    def load_document(docx_path: str) -> tuple[int, str | None]:
+    def load_document(self, docx_path: str) -> tuple[int, str | None]:
         # Load DOCX and count paragraphs as sections
         try:
             doc = docx.Document(docx_path)
@@ -111,8 +108,7 @@ class DocxProcessor(DocumentProcessor):
         except Exception as e:
             return 0, f"Error loading DOCX: {e}"
 
-    @staticmethod
-    def convert_to_markdown(docx_path: str, paragraphs: list[int] = None) -> tuple[str, str | None]:
+    def convert_to_markdown(self, docx_path: str, paragraphs: list[int] | None = None) -> tuple[str, str | None]:
         # Convert specified paragraphs (or all if None) to markdown
         try:
             doc = docx.Document(docx_path)
@@ -129,8 +125,7 @@ class DocxProcessor(DocumentProcessor):
 
 # TXT/Markdown processor for plain text files
 class TextProcessor(DocumentProcessor):
-    @staticmethod
-    def load_document(text_path: str) -> tuple[int, str | None]:
+    def load_document(self, text_path: str) -> tuple[int, str | None]:
         # Load text file and count lines as sections
         try:
             with open(text_path, encoding='utf-8') as f:
@@ -140,8 +135,7 @@ class TextProcessor(DocumentProcessor):
         except Exception as e:
             return 0, f"Error loading text file: {e}"
 
-    @staticmethod
-    def convert_to_markdown(text_path: str, lines: list[int] = None) -> tuple[str, str | None]:
+    def convert_to_markdown(self, text_path: str, lines: list[int] | None = None) -> tuple[str, str | None]:
         # Convert specified lines (or all if None) to markdown (essentially pass-through)
         try:
             with open(text_path, encoding='utf-8') as f:
@@ -158,8 +152,7 @@ class TextProcessor(DocumentProcessor):
 
 # HTML processor using BeautifulSoup
 class HtmlProcessor(DocumentProcessor):
-    @staticmethod
-    def load_document(html_path: str) -> tuple[int, str | None]:
+    def load_document(self, html_path: str) -> tuple[int, str | None]:
         # Load HTML and count significant sections (p, div, section tags) as sections
         try:
             with open(html_path, encoding='utf-8') as f:
@@ -168,8 +161,7 @@ class HtmlProcessor(DocumentProcessor):
         except Exception as e:
             return 0, f"Error loading HTML: {e}"
 
-    @staticmethod
-    def convert_to_markdown(html_path: str, sections: list[int] = None) -> tuple[str, str | None]:
+    def convert_to_markdown(self, html_path: str, sections: list[int] | None = None) -> tuple[str, str | None]:
         # Convert specified sections (or all if None) to markdown
         try:
             with open(html_path, encoding='utf-8') as f:
@@ -183,7 +175,7 @@ class HtmlProcessor(DocumentProcessor):
 
             markdown_content = []
             for section in selected_sections:
-                text = section.get_text(separator='\n\n')
+                text = section.get_text()
                 markdown_content.append(text)
 
             return '\n\n---\n\n'.join(markdown_content), None
@@ -236,12 +228,11 @@ class TokenCounter:
 
 class PdfProcessor(DocumentProcessor):
     ABBREVIATIONS = {'np', 'dr', 'mgr', 'itp', 'e.g', 'i.e', 'etc'}
-    SENTENCE_SPLIT_REGEX = re.compile(r'(?<=[\.\!\?])\s+')
+    SENTENCE_SPLIT_REGEX = re.compile(r'(?<=[.!?])\s+')
     STRUCTURE_REGEX = re.compile(r'^(#{1,6}\s+|```|\|)', re.MULTILINE)
     PARAGRAPH_SPLIT_REGEX = re.compile(r'\n{2,}')
 
-    @staticmethod
-    def load_document(pdf_path: str) -> tuple[int, str | None]:
+    def load_document(self, pdf_path: str) -> tuple[int, str | None]:
         # Load PDF and count pages (unchanged implementation)
         try:
             doc = fitz.open(pdf_path)
@@ -251,10 +242,11 @@ class PdfProcessor(DocumentProcessor):
         except Exception as e:
             return 0, f"Error loading PDF: {e}"
 
-    @staticmethod
-    def convert_to_markdown(pdf_path: str, pages: list[int]) -> tuple[str, str | None]:
+    def convert_to_markdown(self, pdf_path: str, pages: list[int] | None = None) -> tuple[str, str | None]:
         # Convert specified pages to markdown (unchanged implementation)
         try:
+            if pages is None:
+                pages = []
             markdown_text = pymupdf4llm.to_markdown(pdf_path, pages=pages)
             if not markdown_text.strip():
                 return "", "No extractable text in PDF."
@@ -464,7 +456,7 @@ class PdfProcessingWorker(QThread):
     processing_finished = pyqtSignal(str, list, str)
     progress = pyqtSignal(int)
 
-    def __init__(self, file_path: str, pages: list[int], max_tokens: int = None):
+    def __init__(self, file_path: str, pages: list[int], max_tokens: int | None = None):
         # Initialize with file path, sections, and optional max tokens
         super().__init__()
         self.file_path = file_path
@@ -503,10 +495,8 @@ class EpubProcessingWorker(QThread):
     def run(self):
         try:
             # 1) Convert selected chapters into a single markdown string
-            full_md, err = EpubProcessor.convert_to_markdown(
-                self.file_path,
-                chapters=self.chapters
-            )
+            epub_processor = EpubProcessor()
+            full_md, err = epub_processor.convert_to_markdown(self.file_path, self.chapters)
             if err:
                 # on error, emit empty markdown + empty list + error
                 self.processing_finished.emit("", [], err)
@@ -570,9 +560,8 @@ class GenericProcessingWorker(QThread):
             else:
                 import re as _re
 
-                from .rag_utils import DocumentProcessorFactory
                 processor = DocumentProcessorFactory.get_processor(self.file_path)
-                full_md, err = processor.convert_to_markdown(self.file_path, chapters=self.sections)
+                full_md, err = processor.convert_to_markdown(self.file_path, self.sections)
                 if err:
                     self.processing_finished.emit("", [], err)
                     return
@@ -664,26 +653,31 @@ class HistoryDialog(QDialog):
         item = self.history_list.itemAt(pos)
         if not item:
             return
+        selected_item: QListWidgetItem = item
         menu = QMenu(self)
         delete = QAction("Delete", self)
         rename = QAction("Rename", self)
         menu.addAction(delete)
         menu.addAction(rename)
-        delete.triggered.connect(lambda: self.delete_item(item))
-        rename.triggered.connect(lambda: self.rename_item(item))
+        delete.triggered.connect(lambda: self.delete_item(selected_item))
+        rename.triggered.connect(lambda: self.rename_item(selected_item))
         menu.exec_(self.history_list.mapToGlobal(pos))
+
+    def _parent_app(self) -> Any:
+        return cast(Any, self.parent())
 
     def delete_item(self, item: QListWidgetItem):
         title = item.text()
-        file_path = os.path.join(self.parent().history_dir, title)
+        parent_app = self._parent_app()
+        file_path = os.path.join(parent_app.history_dir, title)
         if os.path.exists(file_path):
             try:
                 os.remove(file_path)
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"Failed to delete file from disk: {e!s}")
         self.history = [(t, txt) for t, txt in self.history if t != title]
-        self.parent().search_history = self.history
-        self.parent().save_history()
+        parent_app.search_history = self.history
+        parent_app.save_history()
         self.populate_history_list()
 
     def rename_item(self, item: QListWidgetItem):
@@ -701,8 +695,9 @@ class HistoryDialog(QDialog):
                 if t == old_title:
                     self.history[i] = (new_filename, txt)
                     break
-            self.parent().search_history = self.history
-            self.parent().save_history()
+            parent_app = self._parent_app()
+            parent_app.search_history = self.history
+            parent_app.save_history()
             self.populate_history_list()
 
     def load_article(self, item: QListWidgetItem):
@@ -714,7 +709,8 @@ class HistoryDialog(QDialog):
         title = item.text()
         # Ensure the filename ends with .json
         file_name = title if title.lower().endswith(".json") else f"{title}.json"
-        file_path = os.path.join(self.parent().history_dir, file_name)
+        parent_app = self._parent_app()
+        file_path = os.path.join(parent_app.history_dir, file_name)
         if not os.path.exists(file_path):
             QMessageBox.warning(self, "Error", f"History file not found:\n{file_path}")
             return
@@ -882,13 +878,13 @@ class HistoryDialog(QDialog):
                     json.dump(data, f_out, indent=2, ensure_ascii=False)
 
                 # Update in-memory history list
-                parent_history = self.parent().search_history
+                parent_history = parent_app.search_history
                 for i, (t, txt) in enumerate(parent_history):
                     if t == title:
                         parent_history[i] = (title, new_text)
                         break
-                self.parent().search_history = parent_history
-                self.parent().save_history()
+                parent_app.search_history = parent_history
+                parent_app.save_history()
 
                 nonlocal original_text
                 original_text = new_text

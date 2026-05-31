@@ -2,12 +2,37 @@ import json
 import os
 import re
 import uuid
-from typing import Any
+from typing import Any, TypedDict
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QTreeWidgetItem
 
 from settings.settings_manager import WWSettingsManager
+
+
+class SceneNode(TypedDict, total=False):
+    name: str
+    uuid: str
+
+
+class ChapterNode(TypedDict, total=False):
+    name: str
+    uuid: str
+    summary: str
+    has_summary: bool
+    scenes: list[SceneNode]
+
+
+class ActNode(TypedDict, total=False):
+    name: str
+    uuid: str
+    summary: str
+    has_summary: bool
+    chapters: list[ChapterNode]
+
+
+class StructureData(TypedDict):
+    acts: list[ActNode]
 
 
 def get_structure_file_path(project_name: str, backward_compat: bool = False) -> str:
@@ -37,12 +62,12 @@ def get_structure_file_path(project_name: str, backward_compat: bool = False) ->
                     os.rename(oldpath, path)
     return path
 
-def load_structure(project_name: str) -> dict[str, Any]:
+def load_structure(project_name: str) -> StructureData:
     """
     Load the project structure from the file.
     If the file is missing or in an unexpected format, return a default structure.
     """
-    structure = {"acts": [
+    structure: StructureData = {"acts": [
         {"name": "Act 1", "summary": "This is the summary for Act 1.", "has_summary": False,
          "chapters": [
              {"name": "Chapter 1", "summary": "This is the summary for Chapter 1.", "has_summary": False,
@@ -56,7 +81,11 @@ def load_structure(project_name: str) -> dict[str, Any]:
     file_path = get_structure_file_path(project_name, True)
     if os.path.exists(file_path):
         with open(file_path, encoding="utf-8") as f:
-            structure = json.load(f)
+            raw_structure = json.load(f)
+        if isinstance(raw_structure, dict):
+            structure = {
+                "acts": raw_structure.get("acts", []) if isinstance(raw_structure.get("acts", []), list) else []
+            }
 
         # Add UUIDs and has_summary to existing nodes
         def add_fields(node):
@@ -71,7 +100,7 @@ def load_structure(project_name: str) -> dict[str, Any]:
         save_structure(project_name, structure)
     return structure
 
-def save_structure(project_name: str, structure: dict[str, Any]) -> None:
+def save_structure(project_name: str, structure: StructureData | dict[str, Any]) -> None:
     """Save the given project structure to the file."""
     file_path = get_structure_file_path(project_name)
     try:
@@ -82,36 +111,46 @@ def save_structure(project_name: str, structure: dict[str, Any]) -> None:
     except Exception as e:
         print("Error saving project structure:", e)
 
-def populate_tree(tree, structure):
+def populate_tree(tree: Any, structure: StructureData | dict[str, Any]) -> None:
     """
     Populate the provided QTreeWidget with the project structure.
     The structure is expected to contain "acts", each with "chapters" and "scenes".
     If a node is not a dict or lacks a "name" key, it is converted to a dict using its string value.
     """
-    def ensure_dict(node):
+    def _as_text(value: Any, fallback: str) -> str:
+        if isinstance(value, str) and value:
+            return value
+        return fallback
+
+    def _as_list(value: Any) -> list[Any]:
+        return value if isinstance(value, list) else []
+
+    def ensure_dict(node: Any) -> dict[str, Any]:
         if not isinstance(node, dict):
             return {"name": str(node), "uuid": str(uuid.uuid4()), "has_summary": False}
         # Ensure a "name" key exists.
-        if "name" not in node:
+        if not isinstance(node.get("name"), str) or not node.get("name"):
             node["name"] = "Unnamed"
         if "uuid" not in node:
             node["uuid"] = str(uuid.uuid4())
-        if "summary" in node and "has_summary" not in node:
-            node["has_summary"] = not node["summary"].startswith("This is the summary")
+        summary_value = node.get("summary")
+        if isinstance(summary_value, str) and "has_summary" not in node:
+            node["has_summary"] = not summary_value.startswith("This is the summary")
         return node
 
     tree.clear()
-    for act in structure.get("acts", []):
+    acts = _as_list(structure.get("acts", [])) if isinstance(structure, dict) else []
+    for act in acts:
         act = ensure_dict(act)
-        act_item = QTreeWidgetItem(tree, [act.get("name", "Unnamed Act")])
+        act_item = QTreeWidgetItem(tree, [_as_text(act.get("name"), "Unnamed Act")])
         act_item.setData(0, Qt.ItemDataRole.UserRole, act)
-        for chapter in act.get("chapters", []):
+        for chapter in _as_list(act.get("chapters", [])):
             chapter = ensure_dict(chapter)
-            chapter_item = QTreeWidgetItem(act_item, [chapter.get("name", "Unnamed Chapter")])
+            chapter_item = QTreeWidgetItem(act_item, [_as_text(chapter.get("name"), "Unnamed Chapter")])
             chapter_item.setData(0, Qt.ItemDataRole.UserRole, chapter)
-            for scene in chapter.get("scenes", []):
+            for scene in _as_list(chapter.get("scenes", [])):
                 scene = ensure_dict(scene)
-                scene_item = QTreeWidgetItem(chapter_item, [scene.get("name", "Unnamed Scene")])
+                scene_item = QTreeWidgetItem(chapter_item, [_as_text(scene.get("name"), "Unnamed Scene")])
                 scene_item.setData(0, Qt.ItemDataRole.UserRole, scene)
     tree.expandAll()
 

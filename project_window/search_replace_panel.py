@@ -365,11 +365,15 @@ class SearchReplacePanel(QWidget):
                             act_item.setData(0, Qt.ItemDataRole.UserRole + 1, "true")  # Mark as category
                             act_has_matches = True
                         if not chapter_has_matches:
+                            if act_item is None:
+                                continue
                             chapter_item = QTreeWidgetItem(act_item, [chapter["name"]])
                             chapter_item.setBackground(0, QBrush(parent_bg_color))
                             chapter_item.setFont(0, bold_font)
                             chapter_item.setData(0, Qt.ItemDataRole.UserRole + 1, "true")  # Mark as category
                             chapter_has_matches = True
+                        if chapter_item is None:
+                            continue
                         scene_item = QTreeWidgetItem(chapter_item, [scene["name"]])
                         scene_item.setBackground(0, QBrush(parent_bg_color))
                         scene_item.setFont(0, bold_font)
@@ -481,12 +485,12 @@ class SearchReplacePanel(QWidget):
                         if closest_pos is None or pos < closest_pos:
                             closest_pos = pos
                             closest_match = match
-                if closest_pos is not None:
+                if closest_pos is not None and closest_match is not None:
                     position = closest_pos
                     match_length = len(closest_match)
                     is_replaced = self.results_tree.itemWidget(match_item, 0).findChild(UndoButton) is not None
                     # Update context in widget
-                    context = self.get_single_line_context(plain_text, closest_pos, len(closest_match))
+                    context = self.get_single_line_context(plain_text, closest_pos, match_length)
                     match_widget = MatchItemWidget(context, match_item, self.tint_color, show_undo=is_replaced)
                     self.results_tree.setItemWidget(match_item, 0, match_widget)
                     match_item.setData(0, Qt.ItemDataRole.UserRole, {
@@ -958,12 +962,12 @@ class SearchReplacePanel(QWidget):
                             if closest_pos is None or pos < closest_pos:
                                 closest_pos = pos
                                 closest_match = match
-                    if closest_pos is not None:
+                    if closest_pos is not None and closest_match is not None:
                         position = closest_pos
                         match_length = len(closest_match)
                         is_replaced = self.results_tree.itemWidget(item, 0).findChild(UndoButton) is not None
                         # Update context in widget
-                        context = self.get_single_line_context(plain_text, closest_pos, len(closest_match))
+                        context = self.get_single_line_context(plain_text, closest_pos, match_length)
                         match_widget = MatchItemWidget(context, item, self.tint_color, show_undo=is_replaced)
                         self.results_tree.setItemWidget(item, 0, match_widget)
                         if is_replaced:
@@ -1025,7 +1029,7 @@ class SearchReplacePanel(QWidget):
                     for m in range(scene_item.childCount()):
                         match_item = scene_item.child(m)
                         current_widget = self.results_tree.itemWidget(match_item, 0)
-                        if current_widget:
+                        if isinstance(current_widget, MatchItemWidget):
                             is_replaced = current_widget.findChild(UndoButton) is not None
                             context = current_widget.context_label.text()
                             new_widget = MatchItemWidget(context, match_item, tint_color, show_undo=is_replaced)

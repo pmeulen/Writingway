@@ -866,6 +866,7 @@ class TestAddCharacterEdgeCases:
         assert entry["content"] == "updated"
 
 
+
 # ===========================================================================
 # get_category (legacy) – unknown category returns empty list
 # ===========================================================================
@@ -883,4 +884,64 @@ class TestGetCategoryLegacy:
         entries = compendium_manager.get_category("Weapons")
         names = [e["name"] for e in entries]
         assert "Excalibur" in names
+
+
+# ===========================================================================
+# list_pov_characters / add_pov_character
+# ===========================================================================
+
+class TestPOVCharacters:
+    @pytest.mark.integration
+    def test_list_pov_characters_empty_when_no_category(self, compendium_manager):
+        """list_pov_characters returns [] when the Characters category is absent."""
+        data = compendium_manager.load_data()
+        chars_uuid = next(c["uuid"] for c in data["categories"] if c["name"] == "Characters")
+        compendium_manager.remove_category(chars_uuid)
+        result = compendium_manager.list_pov_characters()
+        assert result == []
+
+    @pytest.mark.integration
+    def test_list_pov_characters_returns_entries_in_order(self, compendium_manager):
+        """Entries are returned in canonical compendium order."""
+        data = compendium_manager.load_data()
+        chars_uuid = next(c["uuid"] for c in data["categories"] if c["name"] == "Characters")
+        compendium_manager.add_entry(chars_uuid, "Zara")
+        compendium_manager.add_entry(chars_uuid, "Aaron")
+        result = compendium_manager.list_pov_characters()
+        names = [r["name"] for r in result]
+        assert names == ["Zara", "Aaron"]
+
+    @pytest.mark.integration
+    def test_add_pov_character_creates_category_if_absent(self, compendium_manager):
+        """add_pov_character creates the Characters category when it doesn't exist."""
+        data = compendium_manager.load_data()
+        chars_uuid = next(c["uuid"] for c in data["categories"] if c["name"] == "Characters")
+        compendium_manager.remove_category(chars_uuid)
+        compendium_manager.add_pov_character("Nova", "A new hero.")
+        names = [r["name"] for r in compendium_manager.list_pov_characters()]
+        assert "Nova" in names
+
+    @pytest.mark.integration
+    def test_add_pov_character_returns_entry_dict_with_uuid(self, compendium_manager):
+        """The returned dict must include a non-empty uuid field."""
+        entry = compendium_manager.add_pov_character("Rin", "A silent warrior.")
+        assert entry.get("uuid")
+        assert entry["name"] == "Rin"
+        assert entry["content"] == "A silent warrior."
+
+    @pytest.mark.integration
+    def test_add_pov_character_upserts_existing_by_name(self, compendium_manager):
+        """Calling add_pov_character twice with the same name updates, not duplicates."""
+        first = compendium_manager.add_pov_character("Rin", "First description.")
+        second = compendium_manager.add_pov_character("Rin", "Updated description.")
+        # Same UUID – only one entry in the list
+        all_entries = compendium_manager.list_pov_characters()
+        rin_entries = [e for e in all_entries if e["name"] == "Rin"]
+        assert len(rin_entries) == 1
+        # UUID is stable across upserts
+        assert first["uuid"] == second["uuid"]
+        # Content was updated
+        retrieved = compendium_manager.get_entry_by_uuid(first["uuid"])
+        assert retrieved["content"] == "Updated description."
+
 

@@ -62,11 +62,11 @@ class NewChatDialog(QDialog):
         self.role_play_radio.toggled.connect(self.update_pov_enabled)
         self.set_default_name()
 
-    def update_pov_enabled(self, checked):
+    def update_pov_enabled(self, checked: bool) -> None:
         self.pov_combo.setEnabled(checked)
-        if checked and self.pov_combo.count() == 1:
+        if checked and self.pov_combo.count() == 2:
             self.pov_combo.handle_pov_character_change() # force user to create a character
-            if self.pov_combo.count() == 1: # user canceled without creating a character
+            if self.pov_combo.count() == 2: # user canceled without creating a character
                 self.writing_coach_radio.toggle()
 
     def set_default_name(self):
