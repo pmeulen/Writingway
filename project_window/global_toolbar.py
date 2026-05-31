@@ -27,6 +27,7 @@ class GlobalToolbar(QWidget):
         self.toolbar.setStyleSheet("")  # Reset any custom styles to use theme
 
         # Create actions and store references
+        self.workbench_action = self.add_action("assets/icons/home.svg", _("Open Workbench"), self.controller.open_workbench)
         self.workshop_action = self.add_action("assets/icons/message-square.svg", _("Workshop Chat"), self.controller.open_workshop)
         self.enhanced_compendium_action = self.add_action("assets/icons/book-open.svg", _("Open Enhanced Compendium"), self.controller.open_enhanced_compendium)
         self.whisper_action = self.add_action("assets/icons/mic.svg", _("Open Whisper"), self.controller.open_whisper_app)
@@ -44,6 +45,7 @@ class GlobalToolbar(QWidget):
     def update_tint(self, tint_color):
         """Update icon tints when theme changes."""
         self.tint_color = tint_color
+        self.workbench_action.setIcon(ThemeManager.get_tinted_icon("assets/icons/home.svg", tint_color))
         self.workshop_action.setIcon(ThemeManager.get_tinted_icon("assets/icons/message-square.svg", tint_color))
         self.enhanced_compendium_action.setIcon(ThemeManager.get_tinted_icon("assets/icons/book-open.svg", tint_color))
         self.whisper_action.setIcon(ThemeManager.get_tinted_icon("assets/icons/mic.svg", tint_color))

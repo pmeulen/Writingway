@@ -838,6 +838,18 @@ class ProjectWindow(QMainWindow):
     def repopulate_prompts(self):
         self.bottom_stack.prose_prompt_panel.repopulate_prompts()
 
+    def open_workbench(self) -> None:
+        """Bring the WorkbenchWindow to the front, restoring it if minimised."""
+        from workbench import WorkbenchWindow
+        for widget in QApplication.topLevelWidgets():
+            if isinstance(widget, WorkbenchWindow):
+                if widget.isMinimized():
+                    widget.showNormal()
+                widget.show()
+                widget.raise_()
+                widget.activateWindow()
+                return
+
     def open_workshop(self):
         self.workshop_window = WorkshopController(self)
         self.workshop_window.view.show()
