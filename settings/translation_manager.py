@@ -17,7 +17,7 @@ class TranslationManager(QObject):
         self.current_language = "en"
         self.setup_gettext(self.current_language)
 
-    def setup_gettext(self, language):
+    def setup_gettext(self, language: str) -> gettext.NullTranslations:
         """
         Set up gettext for the specified language.
         """
@@ -52,7 +52,7 @@ class TranslationManager(QObject):
             gettext.install(self.domain)
             return gettext.NullTranslations()
 
-    def set_language(self, language):
+    def set_language(self, language: str) -> None:
         """
         Change the current language and emit a signal to update the UI.
         """

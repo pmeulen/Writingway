@@ -2,6 +2,7 @@ import json
 import os
 import re
 import uuid
+from typing import Any
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QTreeWidgetItem
@@ -9,7 +10,7 @@ from PyQt5.QtWidgets import QTreeWidgetItem
 from settings.settings_manager import WWSettingsManager
 
 
-def get_structure_file_path(project_name, backward_compat=False):
+def get_structure_file_path(project_name: str, backward_compat: bool = False) -> str:
     """Return the path to the project-specific structure file."""
     sanitized = re.sub(r'\s+', '', project_name)
     structure_name = sanitized + '_structure.json'
@@ -36,7 +37,7 @@ def get_structure_file_path(project_name, backward_compat=False):
                     os.rename(oldpath, path)
     return path
 
-def load_structure(project_name):
+def load_structure(project_name: str) -> dict[str, Any]:
     """
     Load the project structure from the file.
     If the file is missing or in an unexpected format, return a default structure.
@@ -70,7 +71,7 @@ def load_structure(project_name):
         save_structure(project_name, structure)
     return structure
 
-def save_structure(project_name, structure):
+def save_structure(project_name: str, structure: dict[str, Any]) -> None:
     """Save the given project structure to the file."""
     file_path = get_structure_file_path(project_name)
     try:

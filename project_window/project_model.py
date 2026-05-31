@@ -31,7 +31,7 @@ class ProjectModel(QObject):
         self.last_saved_hierarchy = None
         self.compendium = CompendiumManager(project_name)
 
-    def load_settings(self):
+    def load_settings(self) -> dict[str, str]:
         settings = psm.load_project_settings(self.project_name)
         return {
             "global_pov": settings.get("global_pov", _("Third Person Limited")),
@@ -61,13 +61,13 @@ class ProjectModel(QObject):
             merge_fields(old_act, new_act)
         self.save_structure()
 
-    def save_structure(self):
+    def save_structure(self) -> None:
         save_structure(self.project_name, self.structure)
 
     def load_autosave(self, hierarchy, node: dict | None=None):
         return load_latest_autosave(self.project_name, hierarchy, node)
 
-    def migrate_legacy_content(self):
+    def migrate_legacy_content(self) -> None:
         def traverse_and_migrate(node, hierarchy):
             if "content" in node:
                 uuid_val = node.setdefault("uuid", str(uuid.uuid4()))

@@ -19,7 +19,7 @@ class CompendiumEventBus:
         self._weak_refs: weakref.WeakSet = weakref.WeakSet()
 
     @classmethod
-    def get_instance(cls):
+    def get_instance(cls) -> "CompendiumEventBus":
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
@@ -397,7 +397,7 @@ class CompendiumManager:
             print(f"Error parsing compendium references: {e}")
         return refs
 
-    def add_character(self, name, description) -> None:
+    def add_character(self, name: str, description: str) -> None:
         """Add a new character to the compendium.json file."""
         compendium_data = self._load_data()
 
@@ -778,4 +778,6 @@ class CompendiumManager:
                     if e.get("name") == entry:
                         return e.get("content", f"[No content for {entry} in category {category}]")
         return f"[No content for {entry} in category {category}]"
+
+
 
