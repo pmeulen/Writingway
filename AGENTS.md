@@ -49,6 +49,7 @@ Compendium data is stored in `Projects/<project>/compendium.json` and is managed
 
 ## General coding conventions
 - Add type hints to all functions, including return types.
+- Use f-strings for string formatting
 - Use uuid4 strings for all IDs (projects, acts, chapters, sections, compendium entries, prompts); generate with `str(uuid.uuid4())`. Prefer to reference items by ID rather than name. Names can change and aren't guaranteed to be unique.
 - Create one logger per module: `logger = logging.getLogger(__name__)`.
 - Log application flow events and user actions (switching project, loading project, saving project/compendium entry, making a backup, creating chapters/sections/acts, making a choice, sending a prompt to an LLM, stopping it, ets ) with `logger.info()`. Log errors with `logger.error()`. Log warnings with `logger.warning()`.  
@@ -60,6 +61,7 @@ Compendium data is stored in `Projects/<project>/compendium.json` and is managed
 - Name slots `_on_<source>_<event>` (e.g. `_on_save_button_clicked`
 - Put blockSignals(True)/blockSignals(False) around batch programmatic UI updates to prevent cascading signal chains
 - Tree items store the backing dict in `Qt.ItemDataRole.UserRole`; common fields: `uuid`
+- Use MVC for UI logic.
 - Use the `ThemeManager` to get styling. Do not hardcode colors, fonts, or sizes in the UI; if something isn't in the theme, signal this and propose to add it.
 
 ## Project-specific coding conventions
@@ -83,6 +85,8 @@ Compendium data is stored in `Projects/<project>/compendium.json` and is managed
 - Run all tests from the repo root: `python -m pytest tests/`.
 - Configuration lives in `pytest.ini`.
 - Tests are under `tests/`, mirroring the source package layout — e.g. `tests/compendium/` covers `compendium/`, `tests/settings/` covers `settings/`.
+- Always write unit tests and check that they pass for new features.
+- Test both positive and negative scenarios
 - Read TESTING.md before writing or modifying tests.
 
 ## Where to look first
