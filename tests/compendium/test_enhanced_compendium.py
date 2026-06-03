@@ -920,7 +920,7 @@ def test_selection_restored_by_uuid_after_rebuild(qtbot, isolated_cwd, monkeypat
 
     assert win.manager.rename_entry(alice_uuid, "AliceRenamed")
     qtbot.wait(100)
-    win.populate_compendium()
+    win.populate_compendium_tree()
 
     current = win.tree.currentItem()
     assert current is not None
@@ -982,7 +982,7 @@ def test_on_compendium_updated_ignores_other_projects(qtbot, isolated_cwd):
     qtbot.addWidget(win)
 
     calls = []
-    win.populate_compendium = lambda: calls.append("populate")
+    win.populate_compendium_tree = lambda: calls.append("populate")
 
     win.on_compendium_updated("other-project")
     assert calls == []

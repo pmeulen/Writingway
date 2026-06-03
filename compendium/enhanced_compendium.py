@@ -146,7 +146,7 @@ class EnhancedCompendiumWindow(QMainWindow):
         self.main_splitter.setStretchFactor(2, 1)  # Right panel
 
         # 6) Set up the compendium file and populate the UI
-        self.populate_compendium()
+        self.populate_compendium_tree()
         self.connect_signals()
 
         # 7) Window title and size
@@ -258,20 +258,30 @@ class EnhancedCompendiumWindow(QMainWindow):
 
     def _discard_current_entry_changes(self, reload_entry: bool = True) -> None:
         """Discard unsaved changes for the current entry and optionally reload saved values into the UI."""
+        # TODO: Can we have one place for loading an entry?
+
         if self.current_entry_item is None:
             self._reset_dirty()
             return
+        
+        current_item = self.current_entry_item
+        current_entry_name = current_item.text(0)
+        current_entry_uuid = self.current_entry_uuid
 
-        # TODO: Duplicates entry loading code
-        current_entry_name = self.current_entry_item.text(0)
+        logger.info(f"Discarding changes for entry '{current_entry_name}' with uuid '{current_entry_uuid}'")
         self._reset_dirty()
         # Reload authoritative state from disk so discarded changes do not linger
         # in memory when the window is reopened.
         self.compendium_data = self.manager.load_data()
-        self.populate_compendium()
+        self.populate_compendium_tree()  # TODO: do we need to reload the whole compendium?
+
+        # After repopulation, anything could have changed
+        current_item = self.current_entry_item
+        current_entry_name = current_item.text(0)
+        current_entry_uuid = self.current_entry_uuid
+
         if reload_entry:
-            self.find_and_select_entry(current_entry_name)
-            current_item = self.tree.currentItem()
+            logger.info(f"Reloading entry '{current_entry_name}' with uuid '{current_entry_uuid}'")
             if current_item is not None and current_item.data(0, Qt.ItemDataRole.UserRole) == CompendiumEntryType.ENTRY:
                 self.load_entry(current_item.text(0), current_item)
             else:
@@ -398,7 +408,7 @@ class EnhancedCompendiumWindow(QMainWindow):
         self.selected_entry_item = None
         self.current_entry_item = None
         self.setWindowTitle(_("Enhanced Compendium - {}").format(self.project_name))
-        self.populate_compendium()
+        self.populate_compendium_tree()
         if select_default_item and self.tree.currentItem() is None:
             self.select_first_entry()
 
@@ -553,8 +563,6 @@ class EnhancedCompendiumWindow(QMainWindow):
         """Sanitize text by removing non-word characters for safe filenames."""
         return re.sub(r'\W+', '', text)
 
-
-
     def _entry_uuid_from_item(self, entry_item: QTreeWidgetItem) -> str:
         """Return an entry's UUID from tree item data, creating one if missing."""
         entry_uuid = entry_item.data(2, Qt.ItemDataRole.UserRole)
@@ -590,7 +598,7 @@ class EnhancedCompendiumWindow(QMainWindow):
                     return True
         return False
 
-    def populate_compendium(self) -> None:
+    def populate_compendium_tree(self) -> None:
         """Populate the tree view with compendium data from the manager."""
         selected_item_info = self.get_selected_item_info()
 
@@ -735,6 +743,7 @@ class EnhancedCompendiumWindow(QMainWindow):
     def save_current_entry(self) -> bool:
         """Save the current entry's data to the compendium."""
         if self.current_entry_item is not None:
+            logger.debug("save_current_entry: Setting _suppress_unsaved_prompt")
             self._suppress_unsaved_prompt = True
             try:
                 save_ok = self.save_entry(self.current_entry_item)
@@ -799,6 +808,7 @@ class EnhancedCompendiumWindow(QMainWindow):
             images=images,
         )
 
+        logger.info(f"Updating entry '{entry_name}' with UUID {entry_uuid}")
         ok = self.manager.update_entry(entry_uuid, entry)
         if not ok:
             # Safety fallback: entry missing from disk (e.g. corrupted state) — re-add it.
@@ -941,7 +951,7 @@ class EnhancedCompendiumWindow(QMainWindow):
                 if moved:
                     # Force local refresh from disk so this window stays in sync even
                     # if event delivery/order is delayed.
-                    self.populate_compendium()
+                    self.populate_compendium_tree()
                     self._find_and_select_entry_by_uuid(entry_uuid)
 
     def on_item_changed(self, current: QTreeWidgetItem | None, previous: QTreeWidgetItem | None) -> None:
@@ -1035,27 +1045,31 @@ class EnhancedCompendiumWindow(QMainWindow):
             entry_name (str): Name of the entry
             entry_item: The QTreeWidgetItem for this entry
         """
-        if (
-            self.current_entry_item
-                and self.is_dirty()
-                and not self._suppress_unsaved_prompt
-        ):
-            self.save_current_entry()
 
+        if self.current_entry_item and self.is_dirty():
+            if self._suppress_unsaved_prompt:
+                logger.debug("load_entry: Suppressing unsaved changes prompt for entry load")
+            else:
+                self.save_current_entry()
+        
         self.current_entry_item = entry_item
+        entry_uuid = self._entry_uuid_from_item(entry_item)
+        self.current_entry_uuid = entry_uuid
+        logger.info(f"Loading entry '{entry_name}' with uuid '{entry_uuid}'")
+        
         self.entry_name_label.setText(entry_name)
         # Entry selected: show entry-specific actions; enabled state is handled by dirty tracking.
         self.save_button.show()
         self.revert_button.show()
         self.update_add_tag_button_state()
+        
         # Block signals while loading to avoid spuriously marking dirty.
         self.editor.blockSignals(True)
+        
         content_data = entry_item.data(1, Qt.ItemDataRole.UserRole)
         content = content_data if isinstance(content_data, str) else ""
-        self.editor.setPlainText(content)
-        self.editor.blockSignals(False)
-        entry_uuid = self._entry_uuid_from_item(entry_item)
-        self.current_entry_uuid = entry_uuid
+        self.editor.setPlainText(content)         
+
         # Load extended fields directly from the unified entry dict.
         entry_data: CompendiumEntry = self._find_entry_in_data(entry_uuid) or self.manager.make_empty_entry(entry_name, content)
         self.details_editor.blockSignals(True)
@@ -1090,6 +1104,8 @@ class EnhancedCompendiumWindow(QMainWindow):
             self.relationships_list.addTopLevelItem(rel_item)
         self.load_images(entry_data["images"])
         self.update_entry_indicator()
+
+        self.editor.blockSignals(False)
         self._reset_dirty()
         self.tabs.show()
 
@@ -1311,7 +1327,7 @@ class EnhancedCompendiumWindow(QMainWindow):
     def on_compendium_updated(self, updated_project_name: str) -> None:
         """Handle compendium update notifications from the event bus."""
         if updated_project_name == self.project_name:
-            self.populate_compendium()
+            self.populate_compendium_tree()
 
     def filter_tree(self) -> None:
         """Filter tree items by entry name or tag name matching the search bar text."""
