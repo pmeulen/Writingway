@@ -86,11 +86,11 @@ python -m pytest tests/ --cov=. --cov-report=html
 
 ## Markers
 
-| Marker        | When to use                                                                                                                                                                     |
-|---------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `unit`        | Pure logic — no filesystem access, no Qt, fully synchronous.                                                                                                                    |
-| `integration` | Touches the filesystem. Uses the `isolated_cwd` fixture from `tests/conftest.py` to sandbox all I/O inside a temporary directory; the real `Projects/` tree is never written to. |
-| `qt`          | Requires a live `QApplication`. Use the `qtbot` fixture provided by **pytest-qt**.                                                                                              |
+| Marker                     | When to use                                                                                                                                                                      |
+|----------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `@pytest.mark.unit`        | Pure logic — no filesystem access, no Qt, fully synchronous.                                                                                                                     |
+| `@pytest.mark.integration` | Touches the filesystem. Uses the `isolated_cwd` fixture from `tests/conftest.py` to sandbox all I/O inside a temporary directory; the real `Projects/` tree is never written to. |
+| `@pytest.mark.qt`          | Requires a live `QApplication`. Use the `qtbot` fixture provided by pytest-qt.                                                                                                   |
 
 Apply markers to individual tests or whole classes:
 
@@ -106,13 +106,16 @@ class TestCategoryCRUD:
 
 ---
 
-## Writing new tests
-
-1. Mirror the source layout: `compendium/foo.py` → `tests/compendium/test_foo.py`.
-2. Add `tests/<package>/__init__.py` if it does not exist yet.
-3. Use the shared fixtures from `tests/conftest.py`:
-   - `isolated_cwd` — changes the working directory to a temp sandbox for the duration of the test.
-   - `compendium_manager` — a ready-to-use `CompendiumManager` wired to a fresh project directory inside the sandbox.
-4. Mark every test with the appropriate marker (`unit`, `integration`, or `qt`).
-5. Verify the new tests pass before committing: `python -m pytest tests/`.
+## Writing tests
+- Mirror the source layout: `compendium/foo.py` → `tests/compendium/test_foo.py`.
+- Add `tests/<package>/__init__.py` if it does not exist yet.
+- Mark every test with the appropriate marker (`unit`, `integration`, or `qt`).
+- Use the shared fixtures from `tests/conftest.py`:
+  - `isolated_cwd` — changes the working directory to a temp sandbox for the duration of the test. Required for every `integration` test.
+  - `compendium_manager` — a ready-to-use `CompendiumManager` wired to a fresh project directory inside the sandbox.
+- Waiting for Qt events in `qt` tests:
+  - `qtbot.waitSignal(signal, timeout=1000)`: use when waiting for a specific async result (debounced save, event bus update, etc.). Fails fast and deterministically if the signal never fires.
+  - `qtbot.wait(100)`: use only to let the event loop flush already-queued events (repaints, layout passes, deferred deletions) when there is no signal to wait on.
+  - `qtbot.waitExposed(widget)`: use when waiting for a window or dialog to become visible.
+- Verify new tests pass before committing: `python -m pytest tests/`.
 

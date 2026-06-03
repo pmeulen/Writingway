@@ -47,13 +47,23 @@ Compendium data is stored in `Projects/<project>/compendium.json` and is managed
 - **Always use `CompendiumManager.make_empty_entry(name)` to create new entries** — it guarantees all canonical fields are present: `name`, `content`, `uuid`, `details`, `tags`, `relationships`, `images`.
 - `CompendiumEventBus` (singleton via `CompendiumEventBus.get_instance()`) broadcasts compendium updates cross-component; subscribe with `add_updated_listener(callback)` and unsubscribe with `remove_updated_listener(callback)` when the widget is destroyed.
 
-## Conventions to preserve
-- Use fully qualified names for Qt attributes. E.g. `QFont.Weight.Bold`, not just `QFont.Bold`
+## General coding conventions
 - Add type hints to all functions, including return types.
 - Use uuid4 strings for all IDs (projects, acts, chapters, sections, compendium entries, prompts); generate with `str(uuid.uuid4())`. Prefer to reference items by ID rather than name. Names can change and aren't guaranteed to be unique.
-- Use `WWSettingsManager.get_project_path()` / `sanitize()` for project files; project data lives under `Projects/<sanitized project>/`. Use `WWSettingsManager.get_project_relpath(project_name, filename)` to build a full relative path to a file inside a project directory (e.g. `compendium.json`, `selections.json`).
-- Tree items store the backing dict in `Qt.UserRole`; common fields are `uuid`
+- Create one logger per module: `logger = logging.getLogger(__name__)`.
+- Log application flow events and user actions (switching project, loading project, saving project/compendium entry, making a backup, creating chapters/sections/acts, making a choice, sending a prompt to an LLM, stopping it, ets ) with `logger.info()`. Log errors with `logger.error()`. Log warnings with `logger.warning()`.  
+- Always log errors with `logger.error()`. Log warnings with `logger.warning()`.
+
+## Qt coding conventions
+- Use fully qualified names for Qt attributes. E.g. `QFont.Weight.Bold`, not just `QFont.Bold`
+- Create `_setup_some_widget(self) -> None` from the `__init__` of a QMainWindow/QWidget for longer setup code. These functions store references to the widget in the class instance, they do not return them.
+- Name slots `_on_<source>_<event>` (e.g. `_on_save_button_clicked`
+- Put blockSignals(True)/blockSignals(False) around batch programmatic UI updates to prevent cascading signal chains
+- Tree items store the backing dict in `Qt.ItemDataRole.UserRole`; common fields: `uuid`
 - Use the `ThemeManager` to get styling. Do not hardcode colors, fonts, or sizes in the UI; if something isn't in the theme, signal this and propose to add it.
+
+## Project-specific coding conventions
+- Use `WWSettingsManager.get_project_path()` / `sanitize()` for project files; project data lives under `Projects/<sanitized project>/`. Use `WWSettingsManager.get_project_relpath(project_name, filename)` to build a full relative path to a file inside a project directory (e.g. `compendium.json`, `selections.json`).
 - `EmbeddedPromptsPanel` debounces prompt edits and keeps default prompts read-only; prompt changes are saved back to shared `Projects/prompts.json` (with backup `Projects/prompts.bak.json`).
 - Prompt category defaults come from `muse/prompt_utils.py`; keep prompt IDs stable (`default_<category>` for built-ins) because UI logic treats those as non-editable defaults.
 - Workshop features follow strict MVC: logic in `WorkshopController`, state in `WorkshopModel`, display in `WorkshopView`. Do not add business logic directly to view widgets.
@@ -73,13 +83,7 @@ Compendium data is stored in `Projects/<project>/compendium.json` and is managed
 - Run all tests from the repo root: `python -m pytest tests/`.
 - Configuration lives in `pytest.ini`.
 - Tests are under `tests/`, mirroring the source package layout — e.g. `tests/compendium/` covers `compendium/`, `tests/settings/` covers `settings/`.
-- Shared fixtures (filesystem sandbox, `CompendiumManager` instance) are defined in `tests/conftest.py`.
-- **Filesystem isolation**: every test that touches the filesystem uses the `isolated_cwd` fixture, which `monkeypatch.chdir`s into a `tmp_path` sandbox so the real `Projects/` tree is never touched.
-- **Custom markers** — apply with `@pytest.mark.<marker>`:
-  - `unit`: pure logic, no I/O or Qt.
-  - `integration`: touches the filesystem (uses `isolated_cwd`).
-  - `qt`: requires a `QApplication` instance (use the `qtbot` fixture from pytest-qt).
-- When adding a new module, add a corresponding `tests/<package>/test_<module>.py` file and a `tests/<package>/__init__.py` if one does not exist yet.
+- Read TESTING.md before writing or modifying tests.
 
 ## Where to look first
 - Project structure bugs: `project_window/project_model.py`, `project_window/tree_manager.py`, `project_window/project_tree_widget.py`.
