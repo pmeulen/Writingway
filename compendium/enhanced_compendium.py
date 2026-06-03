@@ -116,9 +116,11 @@ class EnhancedCompendiumWindow(QMainWindow):
         self.event_bus.add_updated_listener(self.on_compendium_updated)
         self.compendium_data: CompendiumData = self.manager.make_empty_compendium()
 
-        # The currently selected entry. None if no entry or category is selected.
+        # The currently selected entry/category in the treeview. None if no entry or category is selected.
         self.current_entry_item: QTreeWidgetItem | None = None  # selected tree item (entry or category)
-        self.current_entry_uuid: str | None = None  # uuid of the selected entry or category
+
+        # uuid of the selected entry or category that is currently shown in the editor
+        self.current_entry_uuid: str | None = None
 
         # 1) Create the QToolBar at the top
         self.toolbar: QToolBar

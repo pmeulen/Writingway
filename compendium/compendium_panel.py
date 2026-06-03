@@ -151,9 +151,6 @@ class CompendiumPanel(QWidget):
         if item and item.data(0, Qt.UserRole) == "entry":
             self.open_in_enhanced_compendium()
 
-
-
-
     def show_tree_context_menu(self, pos: QPoint):
         menu = QMenu(self)
         action_open = menu.addAction(_("Open Enhanced Compendium"))
