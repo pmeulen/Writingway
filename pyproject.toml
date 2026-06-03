@@ -123,6 +123,8 @@ ignore_missing_imports = true
 
 # Pyright: type checking
 [tool.pyright]
+venvPath = "."
+venv = "venv"
 pythonVersion = "3.11"
 typeCheckingMode = "basic"
 include = ["*.py", "**/*.py"]
