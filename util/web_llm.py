@@ -97,8 +97,10 @@ class CustomWebView(QWebEngineView):
             QMessageBox.critical(self, "Error", f"Failed to download image: {reply.errorString()}")
 
 class LLMWorker(QThread):
-    finished = pyqtSignal(str)
-    error = pyqtSignal(str)
+    # Emitted when the worker finishes with the response text
+    response_ready: pyqtSignal = pyqtSignal(str)
+    # Emitted on error with an error message
+    error: pyqtSignal = pyqtSignal(str)
 
     def __init__(self, prompt, content, conversation_history=None):
         super().__init__()
@@ -117,7 +119,7 @@ class LLMWorker(QThread):
 
             full_prompt = f"{history_text}User: {self.prompt}\n\nWeb Content:\n{self.content}"
             response = WWApiAggregator.send_prompt_to_llm(full_prompt)
-            self.finished.emit(response)
+            self.response_ready.emit(response)
         except Exception as e:
             self.error.emit(str(e))
 
@@ -699,7 +701,7 @@ class MainWindow(QWidget):
         page_title = title_match.group(1) if title_match else "Unknown Page"
 
         soup = BeautifulSoup(html, 'html.parser')
-        original_text = soup.get_text(separator='\n', strip=True)
+        original_text = soup.get_text('\n', strip=True)
         self.original_content = original_text
 
         orig_token_count = self.count_tokens(original_text)
@@ -971,7 +973,7 @@ class MainWindow(QWidget):
         try:
             # Save the raw content of the page
             soup = BeautifulSoup(html, 'html.parser')
-            original_text = soup.get_text(separator='\n', strip=True)
+            original_text = soup.get_text('\n', strip=True)
             self.original_content = original_text
 
             # Process the text and trim if necessary
@@ -1007,7 +1009,7 @@ class MainWindow(QWidget):
             combined_prompt = f"Web Content:\n{content}\n\nUser: {prompt}"
 
             self.llm_worker = LLMWorker(combined_prompt, "", history)
-            self.llm_worker.finished.connect(self.handle_llm_response)
+            self.llm_worker.response_ready.connect(self.handle_llm_response)
             self.llm_worker.error.connect(self.handle_llm_error)
             self.llm_worker.start()
         except Exception as e:
@@ -1080,7 +1082,7 @@ class MainWindow(QWidget):
         # highlighting/matching function
         def on_search(text):
             cursor = text_edit.textCursor()
-            cursor.movePosition(QTextCursor.MoveOperation.Start)
+            cursor.movePosition(cursor.MoveOperation.Start)
             text_edit.setTextCursor(cursor)
             if text:
                 text_edit.find(text)
@@ -1132,7 +1134,7 @@ class MainWindow(QWidget):
         # search function
         def on_search(text):
             cursor = text_edit.textCursor()
-            cursor.movePosition(QTextCursor.MoveOperation.Start)
+            cursor.movePosition(cursor.MoveOperation.Start)
             text_edit.setTextCursor(cursor)
             if text:
                 text_edit.find(text)
@@ -1178,7 +1180,8 @@ class MainWindow(QWidget):
         page = self.web_view.page()
         self.web_view.setPage(None)
 
-        page.deleteLater()
+        if page is not None:
+            page.deleteLater()
         self.web_profile.deleteLater()
 
         super().closeEvent(event)

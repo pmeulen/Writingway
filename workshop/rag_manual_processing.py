@@ -1,5 +1,6 @@
 import json
 import os
+from dataclasses import asdict, dataclass
 
 from PyQt5 import QtWidgets
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
@@ -29,6 +30,22 @@ from .rag_utils import (
     SettingsManager,
     TokenCounter,
 )
+
+
+@dataclass
+class ExportChunkRecord:
+    chunk_idx: int
+    content: str
+    prompt: str
+    response: str
+
+
+@dataclass
+class ExportPayloadRecord:
+    pdf_path: str
+    page_range: list[int]
+    token_count: int
+    chunks: list[ExportChunkRecord]
 
 
 class LlmWorker(QThread):
@@ -321,7 +338,7 @@ class ManualProcessingWidget(QWidget):
             self.manual_process_btn.setEnabled(False)
 
             self.manual_worker = PdfProcessingWorker(file_path, sections, self.manual_chunk_spin.value())
-            self.manual_worker.finished.connect(self.on_manual_pdf_processing_finished)
+            self.manual_worker.processing_finished.connect(self.on_manual_pdf_processing_finished)
             self.manual_worker.start()
         except ValueError as e:
             QMessageBox.warning(self, "Unsupported Format", str(e))
@@ -463,19 +480,22 @@ class ManualProcessingWidget(QWidget):
             QMessageBox.warning(self, "Error", "No data to export.")
             return
 
-        data = {
-            "pdf_path": self.manual_pdf_path_edit.text(),
-            "page_range": [self.manual_spin_from.value(), self.manual_spin_to.value()],
-            "token_count": TokenCounter.count_tokens(self.manual_markdown_text),
-            "chunks": []
-        }
+        export_chunks: list[ExportChunkRecord] = []
         for idx, chunk in enumerate(self.manual_chunks):
-            data["chunks"].append({
-                "chunk_idx": idx,
-                "content": chunk,
-                "prompt": self.manual_default_prompt_edit.toPlainText(),
-                "response": self.all_llm_responses[idx] if idx < len(self.all_llm_responses) else ""
-            })
+            export_chunk = ExportChunkRecord(
+                chunk_idx=idx,
+                content=chunk,
+                prompt=self.manual_default_prompt_edit.toPlainText(),
+                response=self.all_llm_responses[idx] if idx < len(self.all_llm_responses) else "",
+            )
+            export_chunks.append(export_chunk)
+
+        export_payload = ExportPayloadRecord(
+            pdf_path=self.manual_pdf_path_edit.text(),
+            page_range=[self.manual_spin_from.value(), self.manual_spin_to.value()],
+            token_count=TokenCounter.count_tokens(self.manual_markdown_text),
+            chunks=export_chunks,
+        )
 
         base_pdf_name = os.path.splitext(os.path.basename(self.manual_pdf_path_edit.text()))[0]
         suggested_name, ok = QtWidgets.QInputDialog.getText(
@@ -490,10 +510,10 @@ class ManualProcessingWidget(QWidget):
         save_path = os.path.join(self.parent_app.history_dir, filename)
 
         with open(save_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+            json.dump(asdict(export_payload), f, indent=2, ensure_ascii=False)
         self.parent_app.status_bar.showMessage(f"Saved JSON to {save_path}", 5000)
 
-        combined = "\n\n".join(ch["response"] for ch in data["chunks"])
+        combined = "\n\n".join(chunk_record.response for chunk_record in export_chunks)
         self.parent_app.search_history.append((filename, combined))
         self.parent_app.save_history()
         self.parent_app.status_bar.showMessage(f"History updated with {filename}", 5000)

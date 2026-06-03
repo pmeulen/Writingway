@@ -17,20 +17,37 @@ class ThemeManager(QObject):
       - Generate tinted SVG icons using QSvgRenderer.
     """
 
-    # Signal emitted when theme changes
+    # Signal emitted when theme changes: (theme_name: str)
     themeChanged = pyqtSignal(str)
 
     _instance = None
     _icon_cache = {}  # Cache: (file_path, tint_color) -> QIcon
+    _DISABLED_BUTTON_STYLE = """
+            QPushButton:disabled {
+                background-color: rgba(128, 128, 128, 0.20);
+                color: rgba(128, 128, 128, 0.95);
+                border: 1px solid rgba(128, 128, 128, 0.35);
+            }
+            QPushButton[primary=\"true\"]:disabled {
+                background-color: rgba(128, 128, 128, 0.22);
+                color: rgba(128, 128, 128, 0.98);
+                border: 1px solid rgba(128, 128, 128, 0.40);
+            }
+            QToolButton:disabled {
+                color: rgba(128, 128, 128, 0.90);
+                background-color: rgba(128, 128, 128, 0.12);
+                border: 1px solid rgba(128, 128, 128, 0.25);
+            }
+    """
 
-    def __new__(cls):
+    def __new__(cls) -> "ThemeManager":
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
+            cls._instance = QObject.__new__(cls)
             # Initialize the QObject part
             cls._instance.__init_signals()
         return cls._instance
 
-    def __init_signals(self):
+    def __init_signals(self) -> None:
         # This ensures the QObject is properly initialized
         super().__init__()
 
@@ -812,7 +829,60 @@ class ThemeManager(QObject):
 
     @classmethod
     def get_stylesheet(cls, theme_name):
-        return cls.THEMES.get(theme_name, cls.THEMES["Notion Light"])
+        base_stylesheet = cls.THEMES.get(theme_name, cls.THEMES["Notion Light"])
+        # Keep disabled buttons visually obvious across all themes.
+        return f"{base_stylesheet}\n{cls._DISABLED_BUTTON_STYLE}"
+
+    @classmethod
+    def get_menu_stylesheet(cls, theme_name=None):
+        """Return a small, theme-aware stylesheet for QMenu instances.
+
+        This reuses the theme's base stylesheet (so colors, fonts, and
+        accessibility-related rules are consistent) and appends menu-specific
+        rules that ensure disabled menu items are visibly muted in both
+        light and dark themes.
+        """
+        theme = theme_name or cls._current_theme
+        # Use the full theme stylesheet (includes disabled button rules)
+        base = cls.get_stylesheet(theme)
+
+        # Pick a disabled-menu-item color that contrasts appropriately with
+        # the theme background. For dark backgrounds use a lighter grey;
+        # for light backgrounds use a mid grey. Also pick hover/selected
+        # colours from the theme palette so menus get a visible hover
+        # indicator across themes.
+        try:
+            palette = cls.get_theme_palette(theme)
+            bg = QColor(palette.get("background", "#ffffff"))
+            hover = palette.get("hover", "#f0f0f0")
+            accent = palette.get("accent", "#0066cc")
+            text = palette.get("text", "#000000")
+            if bg.lightness() < 128:
+                disabled_color = 'rgba(200,200,200,0.75)'
+                hover_color = palette.get("hover", "#444444")
+            else:
+                disabled_color = 'rgba(120,120,120,0.95)'
+                hover_color = hover
+        except Exception:
+            disabled_color = 'rgba(150,150,150,0.95)'
+            hover_color = '#f0f0f0'
+            accent = '#0066cc'
+            text = '#000000'
+
+        # Provide explicit :hover rules in addition to :selected. Some
+        # platforms or styles treat hover vs selected differently, so being
+        # explicit ensures the visual highlight appears on mouse-over.
+        menu_rules = (
+            f"\n/* Menu hover/selection styling (theme-aware) */"
+            f"\nQMenuBar::item:hover {{ background-color: {hover_color}; }}"
+            f"\nQMenuBar::item:selected {{ background-color: {hover_color}; }}"
+            f"\nQMenu::item:hover {{ background-color: {hover_color}; color: {accent}; }}"
+            f"\nQMenu::item:selected {{ background-color: {hover_color}; color: {accent}; }}"
+            f"\nQMenu::item:disabled {{ color: {disabled_color}; }}"
+            f"\nQMenu::item {{ padding: 4px 24px; }}"
+        )
+
+        return base + menu_rules
 
     @classmethod
     def apply_theme(cls, widget, theme_name):

@@ -1,5 +1,12 @@
-from gettext import gettext as _
+from __future__ import annotations
 
+import contextlib
+from dataclasses import dataclass
+from gettext import gettext as _
+from typing import Literal
+
+from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
     QComboBox,
     QDialog,
@@ -14,114 +21,171 @@ from PyQt5.QtWidgets import (
 
 from .compendium_manager import CompendiumEventBus, CompendiumManager
 
+# ---------------------------------------------------------------------------
+# Sentinel UUIDs - fixed strings that never collide with real uuid4 entries
+# ---------------------------------------------------------------------------
+NONE_CHARACTER_UUID: str = "00000000-0000-0000-0000-000000000000"
+NEW_CHARACTER_UUID: str = "ffffffff-ffff-ffff-ffff-ffffffffffff"
+
+@dataclass(frozen=True)
+class POVItemData:
+    """Typed payload stored in Qt.ItemDataRole.UserRole for each combo item."""
+    uuid: str
+    kind: Literal["entry", "none", "new"]
+
 
 class POVComboBox(QComboBox):
-    def __init__(self, project_name, initial_pov="Character", parent=None):
+    """Combo box for selecting a POV character from the compendium.
+
+    Emits ``pov_uuid_changed(str)`` whenever the confirmed selection changes.
+    The signal carries the UUID of the selected entry, or ``NONE_CHARACTER_UUID``
+    when *<none>* is selected.
+    """
+
+    pov_uuid_changed: pyqtSignal = pyqtSignal(str)
+
+    def __init__(self, project_name: str, initial_uuid: str = NONE_CHARACTER_UUID, parent=None):
         super().__init__(parent)
         self.project_name = project_name
-        self.selected_pov = initial_pov
         self.event_bus = CompendiumEventBus.get_instance()
         self.compendium = CompendiumManager(project_name, event_bus=self.event_bus)
+
+        self.selected_uuid: str = initial_uuid
+
+        # Connect signal exactly once here (not inside populate_combo).
+        self.currentIndexChanged.connect(self.handle_pov_character_change)
+
         self._setup_listener()
         self.populate_combo()
         self.set_to_selected_pov()
 
-    def _setup_listener(self):
-        """Register listener and ensure cleanup on destruction."""
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _setup_listener(self) -> None:
+        """Register compendium-updated listener and ensure cleanup on destruction."""
         self.event_bus.add_updated_listener(self.on_compendium_updated)
         self.destroyed.connect(self._cleanup_listener)
 
-    def _cleanup_listener(self):
+    def _cleanup_listener(self) -> None:
         """Safely remove listener when widget is destroyed."""
-        try:
+        with contextlib.suppress(Exception):
             self.event_bus.remove_updated_listener(self.on_compendium_updated)
-        except Exception:
-            pass  # Best effort cleanup
+
+    # ------------------------------------------------------------------
+    # Populating / restoring
+    # ------------------------------------------------------------------
 
     def populate_combo(self) -> None:
-        self.clear()
-        characters = self.compendium.get_characters()
-        characters.append(_("Custom..."))
-        self.addItems(characters)
-        self.currentIndexChanged.connect(self.handle_pov_character_change)
-
-    def handle_pov_character_change(self, index=0):
-        value = self.currentText()
-        if value == _("Custom..."):
-            dialog = CustomPOVDialog(self)
-            if dialog.exec_() == QDialog.Accepted:
-                name, description = dialog.get_data()
-
-                # Add to compendium triggers a signal that updates the contents of this combo box
-                # unless the user tried to enter a name that already exists.
-                self.selected_pov = name
-                self.add_character_to_compendium(name, description)
-                # No need to update dropdown - compendium update took care of it
-            else:
-                # Revert to previous selection if canceled
-                self.set_to_selected_pov()
-                return
-        else:
-            self.selected_pov = value
-
-    def on_compendium_updated(self, project_name):
-        """Safe handler that checks if widget still exists."""
-        if not self or self.parent() is None:  # Widget is being destroyed
-            return
-        if project_name != self.project_name:
-            return
-
-        previous_index = self.currentIndex()
-        previous_text = self.selected_pov
-
+        """Rebuild combo contents from the compendium. Signal is already connected."""
         self.blockSignals(True)
         try:
-            self.populate_combo()  # Rebuild list
+            self.clear()
+            # <none> first - grayed out like a disabled menu item (uses palette, not hardcoded)
+            self.addItem(_("<none>"))
+            self.setItemData(0, POVItemData(uuid=NONE_CHARACTER_UUID, kind="none"), Qt.ItemDataRole.UserRole)
+
+            for i, entry in enumerate(self.compendium.list_pov_characters(), start=1):
+                self.addItem(entry["name"])
+                self.setItemData(i, POVItemData(uuid=entry["uuid"], kind="entry"), Qt.ItemDataRole.UserRole)
+
+            # New... last - bold to signal it is an action, not a character name
+            last = self.count()
+            self.addItem(_("New..."))
+            self.setItemData(last, POVItemData(uuid=NEW_CHARACTER_UUID, kind="new"), Qt.ItemDataRole.UserRole)
+            bold_font = QFont(self.font())
+            bold_font.setWeight(QFont.Weight.Bold)
+            self.setItemData(last, bold_font, Qt.ItemDataRole.FontRole)
         finally:
             self.blockSignals(False)
 
-        self.set_to_selected_pov()
-        if self.currentIndex() < 0:
-            index = self.findText(previous_text)
-            if index >= 0:
-                self.setCurrentIndex(index)
-            else:
-                self.setCurrentIndex(min(previous_index, self.count() - 1))
-
-    def set_to_selected_pov(self):
-        """Restore selection safely."""
+    def set_to_selected_pov(self) -> None:
+        """Restore combo selection to ``self.selected_uuid`` without firing signals."""
         if not self:
             return
-        index = self.findText(self.selected_pov)
-        if index >= 0:
-            self.blockSignals(True)
-            self.setCurrentIndex(index)
-            self.blockSignals(False)
-        elif self.count() > 0:
-            value = self.currentText()
-            if (value and value != _("Custom...")):
-                self.selected_pov = value
-            else: # User Canceled custom char
-                self.blockSignals(True)
-                self.setCurrentIndex(0)
-                self.blockSignals(False)
-
-    def add_character_to_compendium(self, name, description):
+        self.blockSignals(True)
         try:
-            self.compendium.add_character(name, description)
+            for i in range(self.count()):
+                data: POVItemData | None = self.itemData(i, Qt.ItemDataRole.UserRole)
+                if data is not None and data.uuid == self.selected_uuid:
+                    self.setCurrentIndex(i)
+                    return
+            # UUID not found - fall back to <none>
+            self.setCurrentIndex(0)
+            self.selected_uuid = NONE_CHARACTER_UUID
+        finally:
+            self.blockSignals(False)
+
+    # ------------------------------------------------------------------
+    # Event handlers
+    # ------------------------------------------------------------------
+
+    def handle_pov_character_change(self, index: int = 0) -> None:
+        data: POVItemData | None = self.itemData(index, Qt.ItemDataRole.UserRole)
+        if data is None:
+            return
+
+        if data.kind == "new":
+            dialog = NewCharacterDialog(self)
+            if dialog.exec_() == QDialog.Accepted:
+                name, description = dialog.get_data()
+                # add_pov_character returns the entry dict including its UUID
+                entry = self.compendium.add_pov_character(name, description)
+                self.selected_uuid = entry["uuid"]
+                # on_compendium_updated will repopulate; emit the signal now so
+                # callers get the UUID immediately (no flicker to <none>).
+                self.pov_uuid_changed.emit(self.selected_uuid)
+            else:
+                # User cancelled - revert
+                self.set_to_selected_pov()
+        elif data.kind in ("entry", "none"):
+            self.selected_uuid = data.uuid
+            self.pov_uuid_changed.emit(self.selected_uuid)
+
+    def on_compendium_updated(self, project_name: str) -> None:
+        """Repopulate when the compendium changes, restoring current selection."""
+        try:
+            _ = self.count()  # Will raise RuntimeError if C++ object is deleted
+        except RuntimeError:
+            return
+        if project_name != self.project_name:
+            return
+        self.populate_combo()
+        self.set_to_selected_pov()
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def current_uuid(self) -> str:
+        """Return the UUID of the currently confirmed selection."""
+        return self.selected_uuid
+
+    def current_pov(self) -> str:
+        """Return the display name for the current selection (empty string for <none>).
+
+        Looks up the name via the compendium so it stays in sync with renames.
+        """
+        if self.selected_uuid == NONE_CHARACTER_UUID:
+            return ""
+        entry = self.compendium.get_entry_by_uuid(self.selected_uuid)
+        return entry["name"] if entry else ""
+
+    def add_character_to_compendium(self, name: str, description: str) -> None:
+        """[Legacy] Add/update a character. Prefer ``compendium.add_pov_character`` directly."""
+        try:
+            self.compendium.add_pov_character(name, description)
         except Exception as e:
             print(f"Error saving compendium: {e}")
             QMessageBox.warning(self, _("Error"), _("Failed to save compendium: {}").format(str(e)))
 
-    def current_pov(self) -> str:
-        """Public API for other classes to get current selection."""
-        return self.selected_pov if self.selected_pov != _("Custom...") else self.currentText()
 
-class CustomPOVDialog(QDialog):
-    """Dialog for entering a custom POV character name and description."""
+class NewCharacterDialog(QDialog):
+    """Dialog for entering a compendium character name and description."""
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(_("Custom POV Character"))
+        self.setWindowTitle(_("Add new Character"))
         self.setModal(True)
         layout = QVBoxLayout(self)
 
@@ -148,11 +212,11 @@ class CustomPOVDialog(QDialog):
         self.ok_button.clicked.connect(self.ok_button_pressed)
         self.cancel_button.clicked.connect(self.reject)
 
-    def ok_button_pressed(self):
+    def ok_button_pressed(self) -> None:
         if not self.name_input.text().strip():
-            QMessageBox.warning(self, _("Custom POV Character"), _("Character name cannot be empty."))
+            QMessageBox.warning(self, _("Add new Character"), _("Character name cannot be empty."))
             return
         self.accept()
 
-    def get_data(self):
+    def get_data(self) -> tuple[str, str]:
         return self.name_input.text().strip(), self.description_input.toPlainText().strip()

@@ -5,7 +5,7 @@ import threading
 import time
 from gettext import gettext as _
 from gettext import pgettext
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional, cast
 
 import PyQt5
 import tiktoken
@@ -40,7 +40,6 @@ from settings.theme_manager import ThemeManager
 from util.ia_window import IAWindow
 from util.text_analysis_gui import TextAnalysisApp
 from util.tts_manager import WW_TTSManager
-from util.web_llm import MainWindow
 from util.whisper_app import WhisperApp
 from workshop.workshop_controller import WorkshopController
 
@@ -274,10 +273,10 @@ class ProjectWindow(QMainWindow):
             self.project_tree.tree.setCurrentItem(item)
             self.load_current_item_content()
 
-    def load_initial_state(self):
-        current_pov = self.model.settings["global_pov_character"]
-        self.update_pov_character_dropdown()
-        self.bottom_stack.pov_character_combo.setCurrentText(current_pov)
+    def load_initial_state(self) -> None:
+        initial_uuid = self.model.settings.get("global_pov_character", "")
+        self.bottom_stack.pov_character_combo.selected_uuid = initial_uuid if initial_uuid else ""
+        self.bottom_stack.pov_character_combo.set_to_selected_pov()
         self.bottom_stack.pov_combo.setCurrentText(self.model.settings["global_pov"])
         self.bottom_stack.tense_combo.setCurrentText(self.model.settings["global_tense"])
         self.bottom_stack.prompt_input.setPlainText(self.load_prompt_input())
@@ -514,9 +513,9 @@ class ProjectWindow(QMainWindow):
         self.update_setting_tooltips()
         self.model.save_settings()
 
-    def update_setting_tooltips(self):
+    def update_setting_tooltips(self) -> None:
         self.bottom_stack.pov_combo.setToolTip(_("POV: {}").format(self.model.settings['global_pov']))
-        self.bottom_stack.pov_character_combo.setToolTip(_("POV Character: {}").format(self.model.settings['global_pov_character']))
+        self.bottom_stack.pov_character_combo.setToolTip(_("POV Character: {}").format(self.bottom_stack.pov_character_combo.current_pov()))
         self.bottom_stack.tense_combo.setToolTip(pgettext("verb_tense", "Tense: {}").format(self.model.settings['global_tense']))
 
     def send_prompt(self):
@@ -529,19 +528,36 @@ class ProjectWindow(QMainWindow):
             QMessageBox.warning(self, _("LLM Prompt"), _("Please select a prompt."))
             return
         overrides = self.bottom_stack.prose_prompt_panel.get_overrides()
-        additional_vars = self.bottom_stack.get_additional_vars()
-        current_scene_text = self.scene_editor.editor.toPlainText().strip() if self.project_tree.tree.currentItem() and self.project_tree.get_item_level(self.project_tree.tree.currentItem()) >= 2 else None
+        raw_additional_vars = self.bottom_stack.get_additional_vars()
+        additional_vars: dict[str, str] = {key: str(value) for key, value in raw_additional_vars.items()}
+        current_scene_text = (
+            self.scene_editor.editor.toPlainText().strip()
+            if self.project_tree.tree.currentItem() and self.project_tree.get_item_level(self.project_tree.tree.currentItem()) >= 2
+            else None
+        )
+        if current_scene_text is not None:
+            current_scene_text = str(current_scene_text)
         extra_context = self.bottom_stack.context_panel.get_selected_context_text()
-        final_prompt = prompt_handler.assemble_final_prompt(prose_config, action_beats, additional_vars, current_scene_text, extra_context)
+        if extra_context is not None:
+            extra_context = str(extra_context)
+        final_prompt: str = str(
+            prompt_handler.assemble_final_prompt(
+                prose_config,
+                action_beats,
+                additional_vars,
+                current_scene_text,
+                extra_context,
+            )
+        )
         self.bottom_stack.preview_text.clear()
         self.bottom_stack.send_button.setEnabled(False)
         self.bottom_stack.preview_text.setReadOnly(True)
         QApplication.processEvents()
         self.stop_llm()
         self.worker = LLMWorker(final_prompt, overrides)
-        self.worker.data_received.connect(self.update_text)
-        self.worker.finished.connect(self.on_finished)
-        self.worker.token_limit_exceeded.connect(self.handle_token_limit_error)
+        cast(Any, self.worker.data_received).connect(self.update_text)
+        cast(Any, self.worker.stream_finished).connect(self.on_finished)
+        cast(Any, self.worker.token_limit_exceeded).connect(self.handle_token_limit_error)
         self.worker.start()
 
     def handle_token_limit_error(self, error_msg):
@@ -556,27 +572,30 @@ class ProjectWindow(QMainWindow):
         self.bottom_stack.summary_controller.create_summary()
         QTimer.singleShot(30000, lambda: self.retry_with_auto_summary())
 
-    def retry_with_summary(self, summary):
-        additional_vars = {
-            "pov": self.model.settings["global_pov"] or _("Third Person"),
-            "pov_character": self.model.settings["global_pov_character"] or _("Character"),
-            "tense": self.model.settings["global_tense"] or _("Present Tense"),
+    def retry_with_summary(self, summary: str) -> None:
+        additional_vars: dict[str, str] = {
+            "pov": str(self.model.settings.get("global_pov") or _("Third Person")),
+            "pov_character": str(self.bottom_stack.pov_character_combo.current_pov() or _("Character")),
+            "tense": str(self.model.settings.get("global_tense") or _("Present Tense")),
         }
         action_beats = self.bottom_stack.prompt_input.toPlainText().strip()
         prose_config = self.bottom_stack.prose_prompt_panel.get_prompt()
-        final_prompt = prompt_handler.assemble_final_prompt(
-            prose_config.get("text"),
-            action_beats, additional_vars,
-            summary,
-            None
+        final_prompt: str = str(
+            prompt_handler.assemble_final_prompt(
+                prose_config,
+                action_beats,
+                additional_vars,
+                summary,
+                None,
+            )
         )
         self.bottom_stack.preview_text.clear()
         self.bottom_stack.preview_text.setReadOnly(True)
         self.worker = LLMWorker(final_prompt, prose_config)
-        self.worker.data_received.connect(self.update_text)
-        self.worker.finished.connect(self.on_finished)
-        self.worker.finished.connect(self.cleanup_worker)
-        self.worker.token_limit_exceeded.connect(self.show_token_limit_dialog)
+        cast(Any, self.worker.data_received).connect(self.update_text)
+        cast(Any, self.worker.stream_finished).connect(self.on_finished)
+        cast(Any, self.worker.stream_finished).connect(self.cleanup_worker)
+        cast(Any, self.worker.token_limit_exceeded).connect(self.show_token_limit_dialog)
         self.worker.start()
 
     def retry_with_auto_summary(self):
@@ -621,7 +640,7 @@ class ProjectWindow(QMainWindow):
                 try:
                     logging.debug(f"Disconnecting signals for worker {worker_id}")
                     self.worker.data_received.disconnect()
-                    self.worker.finished.disconnect()
+                    self.worker.stream_finished.disconnect()
                     self.worker.token_limit_exceeded.disconnect()
                 except TypeError as e:
                     logging.debug(f"Signal disconnection error for worker {worker_id}: {e}")
@@ -783,6 +802,9 @@ class ProjectWindow(QMainWindow):
         self.analysis_editor_window.show()
 
     def open_web_llm(self):
+        # Delay QtWebEngine import until this tool is explicitly opened.
+        from util.web_llm import MainWindow
+
         self.web_llm = MainWindow()
         self.web_llm.show()
 
@@ -801,8 +823,34 @@ class ProjectWindow(QMainWindow):
     def open_compendium(self):
         self.toggle_compendium_view(not self.side_bar.isVisible() or self.side_bar.currentWidget() != self.compendium_panel)
 
+    def open_enhanced_compendium(self):
+        """Open the enhanced compendium for this project, or focus it if already visible."""
+        if not self.enhanced_window:
+            QMessageBox.warning(self, _("Compendium"), _("Enhanced Compendium is not available."))
+            return
+
+        if self.enhanced_window.isVisible():
+            self.enhanced_window._ensure_window_visible()
+            if self.enhanced_window.project_name != self.model.project_name:
+                self.enhanced_window.open_with_entry(self.model.project_name, None)
+            return
+
+        self.enhanced_window.open_with_entry(self.model.project_name, None)
+
     def repopulate_prompts(self):
         self.bottom_stack.prose_prompt_panel.repopulate_prompts()
+
+    def open_workbench(self) -> None:
+        """Bring the WorkbenchWindow to the front, restoring it if minimised."""
+        from workbench import WorkbenchWindow
+        for widget in QApplication.topLevelWidgets():
+            if isinstance(widget, WorkbenchWindow):
+                if widget.isMinimized():
+                    widget.showNormal()
+                widget.show()
+                widget.raise_()
+                widget.activateWindow()
+                return
 
     def open_workshop(self):
         self.workshop_window = WorkshopController(self)
@@ -819,34 +867,6 @@ class ProjectWindow(QMainWindow):
             cursor.insertText(dialog.rewritten_text)
             self.scene_editor.editor.setTextCursor(cursor)
 
-    def update_pov_character_dropdown(self):
-        characters = []
-        try:
-            characters = self.model.compendium.get_characters()
-        except Exception as e:
-            print(f"Error loading characters from compendium: {e}")
-        if not characters:
-            characters = ["Alice", "Bob", "Charlie"]
-        characters.append(_("Custom..."))
-        self.bottom_stack.pov_character_combo.blockSignals(True)
-        self.bottom_stack.pov_character_combo.clear()
-        self.bottom_stack.pov_character_combo.addItems(characters)
-        self.bottom_stack.pov_character_combo.blockSignals(False)
-
-    def restore_pov_character(self, previous_pov, previous_index):
-        combo = self.bottom_stack.pov_character_combo
-        index = combo.findText(previous_pov)
-        if index >= 0:
-            combo.setCurrentIndex(index)
-        else:
-            if combo.count() == 2 and combo.itemText(0) != _("Custom..."):
-                combo.setCurrentIndex(0)
-            elif combo.count() > previous_index: # possibly renamed character
-                combo.blockSignals(True)
-                combo.setCurrentIndex(previous_index)
-                combo.blockSignals(False)
-            else:
-                combo.setCurrentIndex(combo.findText(_("Custom...")))
 
     def update_icons(self):
         tint_str = ThemeManager.ICON_TINTS.get(self.current_theme, "black")

@@ -127,7 +127,7 @@ COLORS = {
 }
 
 class ComprehensiveAnalysisWorker(QThread):
-    finished = pyqtSignal(dict)
+    analysis_completed = pyqtSignal(dict)
     error = pyqtSignal(Exception)
 
     def __init__(self, full_text, target_grade, analysis_instance):
@@ -139,7 +139,7 @@ class ComprehensiveAnalysisWorker(QThread):
     def run(self):
         try:
             results = self.analysis_instance.comprehensive_analysis(self.full_text, self.target_grade)
-            self.finished.emit(results)
+            self.analysis_completed.emit(results)
         except Exception as e:
             self.error.emit(e)
 
@@ -655,7 +655,7 @@ class TextAnalysisApp(QWidget):
 
         self.results_label.setText("Analyzing text...")
         self.worker = ComprehensiveAnalysisWorker(full_text, target_grade, self.analysis_instance)
-        self.worker.finished.connect(self.update_highlighting)
+        self.worker.analysis_completed.connect(self.update_highlighting)
         self.worker.error.connect(self.handle_error)
         self.worker.start()
 

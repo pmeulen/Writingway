@@ -1,5 +1,6 @@
 import json
 import os
+import os.path as osp
 import re
 from difflib import SequenceMatcher
 
@@ -205,7 +206,7 @@ class SimpleQaSystem:
         return response, token_stats
 
 class QaWorker(QThread):
-    finished = pyqtSignal(str, list)
+    qa_completed = pyqtSignal(str, list)
     error = pyqtSignal(str)
 
     def __init__(self, markdown_text, question, mode,
@@ -307,7 +308,7 @@ class QaWorker(QThread):
             result_text += f"Total tokens: {token_stats['total_tokens']:,}\n"
             result_text += "~ Note: Token counts are approximate and may vary across models, due to different tokenization methods."
 
-            self.finished.emit(result_text, relevant_sections)
+            self.qa_completed.emit(result_text, relevant_sections)
 
         except Exception as e:
             self.error.emit(f"Error: {e!s}")
@@ -585,7 +586,7 @@ class SmartQAWidget(QWidget):
     def on_qa_pdf_path_changed(self):
         path = self.qa_pdf_path_edit.text().strip()
         supported_extensions = ['.pdf', '.epub', '.docx', '.txt', '.md', '.html']
-        is_valid_file = any(path.lower().endswith(ext) for ext in supported_extensions) and os.path.isfile(path)
+        is_valid_file = any(path.lower().endswith(ext) for ext in supported_extensions) and osp.isfile(path)
         self.qa_process_btn.setEnabled(is_valid_file)
         self.qa_search_btn.setEnabled(False)
 
@@ -593,7 +594,7 @@ class SmartQAWidget(QWidget):
             self.qa_status_label.setText("No document loaded")
             self.qa_status_label.setStyleSheet("color: #888888; font-style: italic;")
         elif is_valid_file:
-            self.qa_status_label.setText(f"Ready to process: {os.path.basename(path)}")
+            self.qa_status_label.setText(f"Ready to process: {osp.basename(path)}")
             self.qa_status_label.setStyleSheet("color: #006400; font-style: normal;")
             self.load_qa_pdf_info()
         else:
@@ -656,7 +657,7 @@ class SmartQAWidget(QWidget):
                 self.qa_worker = GenericProcessingWorker(file_path, sections)
 
             # connect and start
-            self.qa_worker.finished.connect(self.on_qa_pdf_processing_finished)
+            self.qa_worker.processing_finished.connect(self.on_qa_pdf_processing_finished)
             self.qa_worker.start()
 
         except ValueError as e:
@@ -741,7 +742,7 @@ class SmartQAWidget(QWidget):
             custom_instr,
             self.SNIPPET_LENGTH
         )
-        self.qa_worker.finished.connect(self.on_qa_success)
+        self.qa_worker.qa_completed.connect(self.on_qa_success)
         self.qa_worker.error.connect(self.on_qa_error)
         self.qa_worker.start()
 

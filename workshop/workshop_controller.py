@@ -1,6 +1,7 @@
 import datetime
 import re
 from gettext import gettext as _
+from typing import Any, cast
 
 from PyQt5.QtGui import QCursor, QPixmap
 from PyQt5.QtWidgets import QMessageBox
@@ -8,6 +9,7 @@ from PyQt5.QtWidgets import QMessageBox
 from muse.prompt_preview_dialog import PromptPreviewDialog
 from settings.llm_api_aggregator import WWApiAggregator
 from settings.llm_worker import LLMWorker
+from settings.settings_manager import WWSettingsManager
 
 from .audio_utils import AudioRecorder, TranscriptionWorker
 from .chat_session import RolePlaySession, WritingCoachSession
@@ -84,11 +86,15 @@ class WorkshopController:
                 # User cancelled → fallback to current project
                 chat_project = self.model.project_name
 
+        if not isinstance(chat_project, str) or not chat_project:
+            return
+        chat_project_name: str = chat_project
+
         # Switch ContextPanel if needed
-        if chat_project != self.view.context_panel.project_name:
-            structure = self.model.load_project_structure(chat_project)
-            provider = ProjectContextProvider(chat_project)   # ← Clean injection
-            self.view.context_panel.switch_to_project(chat_project, structure=structure, context_provider=provider)
+        if chat_project_name != self.view.context_panel.project_name:
+            structure = self.model.load_project_structure(chat_project_name)
+            provider = ProjectContextProvider(chat_project_name)
+            self.view.context_panel.switch_to_project(chat_project_name, structure=structure, context_provider=provider)
 
         selections = self.model.conversation_manager.get_context_selections(name)
 
@@ -326,7 +332,7 @@ class WorkshopController:
         overrides = self.view.prompt_panel.get_overrides()
         self.worker = LLMWorker(payload, overrides)
         self.worker.data_received.connect(self.handle_stream_data)
-        self.worker.finished.connect(self.handle_stream_finished)
+        self.worker.stream_finished.connect(self.handle_stream_finished)
         self.worker.token_limit_exceeded.connect(self.handle_token_limit)
         self.worker.start()
         self.is_streaming = True
@@ -377,15 +383,16 @@ class WorkshopController:
         self.view.finalize_streaming_message()
         self._reset_stream_state()
 
-    def cleanup_worker(self):
+    def cleanup_worker(self) -> None:
         if self.worker:
             self.worker.data_received.disconnect()
-            self.worker.finished.disconnect()
+            self.worker.stream_finished.disconnect()
             self.worker.token_limit_exceeded.disconnect()
             self.worker.deleteLater()
             self.worker = None
-        provider_name = self.view.prompt_panel.get_overrides().get("provider") or WWSettingsManager.get_active_llm_name()
-        provider = WWApiAggregator.aggregator.get_provider(provider_name)
+        provider_override = self.view.prompt_panel.get_overrides().get("provider")
+        provider_name = provider_override if isinstance(provider_override, str) and provider_override else WWSettingsManager.get_active_llm_name()
+        _provider = WWApiAggregator.aggregator.get_provider(provider_name)
         # Reset provider if needed
 
     def preview_prompt(self):
@@ -421,10 +428,11 @@ class WorkshopController:
 
     def start_recording(self):
         import tempfile
-        recording_file = tempfile.mktemp(suffix='.wav')
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
+            recording_file = temp_file.name
         self.view.recorder = AudioRecorder()
         self.view.recorder.setup_recording(recording_file)
-        self.view.recorder.finished.connect(self.on_recording_finished)
+        cast(Any, self.view.recorder.recording_finished).connect(self.on_recording_finished)
         self.view.recorder.start()
         self.start_time = datetime.datetime.now()
         self.pause_start = None
@@ -464,7 +472,7 @@ class WorkshopController:
         self.view.set_override_cursor(self.waiting_cursor)
         language = None if self.view.language_combo.currentText() == "Auto" else self.view.language_combo.currentText()
         self.view.transcription_worker = TranscriptionWorker(file_path, self.view.model_combo.currentText(), language)
-        self.view.transcription_worker.finished.connect(self.handle_transcription)
+        cast(Any, self.view.transcription_worker.transcription_ready).connect(self.handle_transcription)
         self.view.transcription_worker.start()
 
     def handle_transcription(self, text):

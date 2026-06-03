@@ -1,11 +1,17 @@
 from gettext import gettext as _
-
-from langchain.prompts import PromptTemplate
+from string import Formatter
+from typing import Any
 
 from settings.llm_api_aggregator import WWApiAggregator
 
 
-def assemble_final_prompt(prompt_config, user_input, additional_vars=None, current_scene_text=None, extra_context=None):
+def assemble_final_prompt(
+    prompt_config: dict[str, Any],
+    user_input: str,
+    additional_vars: dict[str, str] | None = None,
+    current_scene_text: str | None = None,
+    extra_context: str | None = None,
+) -> str:
     """
     Assemble a final prompt using a configurable PromptTemplate.
     
@@ -17,7 +23,7 @@ def assemble_final_prompt(prompt_config, user_input, additional_vars=None, curre
         extra_context (str, optional): Additional context from the context panel.
     
     Returns:
-        PromptTemplate: The assembled prompt ready for invocation.
+        str: The assembled prompt ready for invocation.
     """
     # Extract prompt text and variables from config
     prompt_text = prompt_config.get("text", "Write a story chapter based on the following user input")
@@ -57,27 +63,36 @@ def assemble_final_prompt(prompt_config, user_input, additional_vars=None, curre
     if additional_vars:
         default_vars.update(additional_vars)
 
-    # Create the PromptTemplate with all possible variables
-    prompt_template = PromptTemplate(
-        input_variables=list(set(expected_vars + list(default_vars.keys()))),
-        template=base_template # was full_prompt_text
-    )
-
-    # Validate that all required variables are provided
-    missing_vars = [var for var in prompt_template.input_variables if var not in default_vars]
+    # Validate that all required variables are provided.
+    formatter = Formatter()
+    template_fields = {
+        field_name
+        for _, field_name, _, _ in formatter.parse(base_template)
+        if field_name
+    }
+    required_vars = template_fields.union(set(expected_vars))
+    missing_vars = [var for var in required_vars if var not in default_vars]
     if missing_vars:
         raise ValueError(_("Missing variables for prompt: {}").format(missing_vars))
 
-    # Invoke the template with the variables
-    final_prompt = prompt_template.invoke(default_vars)
-    return final_prompt
+    # Build plain text prompt consumed by LLMWorker.
+    return base_template.format(**default_vars)
 
-def preview_final_prompt(prompt_config, user_input, additional_vars=None, current_scene_text=None, extra_context=None):
+def preview_final_prompt(
+    prompt_config: dict[str, Any],
+    user_input: str,
+    additional_vars: dict[str, str] | None = None,
+    current_scene_text: str | None = None,
+    extra_context: str | None = None,
+) -> str:
     """Generate a preview of the final prompt as a string."""
-    final_prompt = assemble_final_prompt(prompt_config, user_input, additional_vars, current_scene_text, extra_context)
-    return final_prompt.text  # Return as plain text for display
+    return assemble_final_prompt(prompt_config, user_input, additional_vars, current_scene_text, extra_context)
 
-def send_final_prompt(final_prompt, prompt_config=None, overrides=None):
+def send_final_prompt(
+    final_prompt: str,
+    prompt_config: dict[str, Any] | None = None,
+    overrides: dict[str, Any] | None = None,
+) -> str:
     """
     Sends the final prompt to the LLM using settings from the prompt's configuration.
     The configuration should include keys such as "provider", "model", "timeout", and "api_key".
