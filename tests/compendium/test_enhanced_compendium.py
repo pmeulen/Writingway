@@ -104,6 +104,35 @@ def test_move_entry_rebuilds_tree_and_reselects_entry(isolated_cwd, qtbot, monke
             return {cat_item.child(j).data(2, Qt.UserRole) for j in range(cat_item.childCount())}
 
 
+@pytest.mark.qt
+def test_project_combo_initialization_switches_from_default_project(isolated_cwd, qtbot, monkeypatch):
+    """The window should load the selected project on startup, not stay on ``default``."""
+    default_manager = CompendiumManager(project_name="default", event_bus=None)
+    default_category_uuid = default_manager.list_categories()[0]["uuid"]
+    default_manager.rename_category(default_category_uuid, "Characters")
+    default_entry = default_manager.add_entry(default_category_uuid, "Default Alice", "Default content")
+
+    project_name = "TestProject"
+    manager = CompendiumManager(project_name=project_name, event_bus=None)
+    project_category_uuid = manager.list_categories()[0]["uuid"]
+    manager.rename_category(project_category_uuid, "Characters")
+    project_entry = manager.add_entry(project_category_uuid, "Project Alice", "Project content")
+
+    parent = _make_fake_workbench_parent(monkeypatch, [project_name])
+    qtbot.addWidget(parent)
+    window = EnhancedCompendiumWindow(parent=parent)
+    qtbot.addWidget(window)
+
+    assert window.project_name == project_name
+    assert window.manager.project_name == project_name
+    assert window._find_and_select_entry_by_uuid(project_entry["uuid"])
+    assert not window._find_and_select_entry_by_uuid(default_entry["uuid"])
+
+    current_item = window.tree.currentItem()
+    assert current_item is not None
+    assert current_item.text(0) == "Project Alice"
+
+
 import json
 from pathlib import Path
 
@@ -1547,5 +1576,4 @@ def test_add_relationship_stores_uuid_not_name(qtbot, isolated_cwd, monkeypatch)
     assert stored_uuid != "Bob", "UUID must not equal the character name"
 
     _silence_close_guard(win, monkeypatch)
-
 

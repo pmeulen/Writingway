@@ -724,6 +724,24 @@ class TestLoadDataEdgeCases:
         assert entry.get("uuid")
 
     @pytest.mark.integration
+    def test_minimal_v3_entry_gets_missing_unified_fields(self, compendium_manager):
+        raw = {
+            "version": 3,
+            "categories": [
+                {"name": "C", "uuid": "c-uuid", "entries": [{"name": "E", "uuid": "e-uuid", "content": "x"}]},
+            ],
+        }
+        with open(compendium_manager._filepath, "w", encoding="utf-8") as f:
+            json.dump(raw, f)
+
+        data = compendium_manager._load_data()
+        entry = data["categories"][0]["entries"][0]
+        assert entry["details"] == ""
+        assert entry["tags"] == []
+        assert entry["relationships"] == []
+        assert entry["images"] == []
+
+    @pytest.mark.integration
     def test_duplicate_entry_uuid_is_resolved(self, compendium_manager):
         shared_uuid = "dup-uuid-entry"
         raw = {
@@ -1074,5 +1092,4 @@ class TestRelationshipUUIDMigration:
         assert carol["uuid"] in uuid_set
         for rel in rels:
             assert "name" not in rel
-
 

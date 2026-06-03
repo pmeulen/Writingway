@@ -50,16 +50,16 @@ logger = logging.getLogger(__name__)
 
 # Constants for tree item types used in Qt.ItemDataRole.UserRole for the compendium tree
 class CompendiumEntryType(StrEnum):
-    ENTRY = "entry"  # Was: CompendiumEntryType.ENTRY
-    CATEGORY = "category"  # Was: CompendiumEntryType.CATEGORY
+    ENTRY = "entry"
+    CATEGORY = "category"
 
 # Constants for compendium entry field names used in the CompendiumEntry TypedDict and as members of the dirty_fields set.
 class CompendiumField(StrEnum):
-    OVERVIEW = "overview"  # Was: CompendiumField.OVERVIEW
-    DETAILS = "details"  # Was: CompendiumField.DETAILS
-    TAGS = "tags"  # Was: CompendiumField.TAGS
-    IMAGES = "images"  # Was: CompendiumField.IMAGES
-    RELATIONSHIPS = "relationships"  # Was: CompendiumField.RELATIONSHIPS
+    OVERVIEW = "overview"
+    DETAILS = "details"
+    TAGS = "tags"
+    IMAGES = "images"
+    RELATIONSHIPS = "relationships"
 
 class EnhancedCompendiumWindow(QMainWindow):
     """
@@ -313,11 +313,7 @@ class EnhancedCompendiumWindow(QMainWindow):
         Args:
             project_name (str, optional): Specific project to select
         """
-
-        if project_name:
-            self.project_name = project_name
-        else:
-            project_name = self.project_name
+        selected_project = project_name or self.project_name
 
         self.project_combo.blockSignals(True)
         self.project_combo.clear()
@@ -327,30 +323,30 @@ class EnhancedCompendiumWindow(QMainWindow):
             projects.sort()
             self.project_combo.addItems(projects)
             # Match by the exact project display name
-            index = self.project_combo.findText(project_name)
+            index = self.project_combo.findText(selected_project)
             if index < 0:
                 # Default to the first project in the list if none matched.
                 self.project_combo.setCurrentIndex(0)
-                self.project_name = self.project_combo.currentText()
+                selected_project = self.project_combo.currentText()
+            else:
+                self.project_combo.setCurrentIndex(index)
+                selected_project = self.project_combo.currentText()
         else:
             # TODO: How to handle empty project list better?
             # This creates a dummy "default" project, but bypasses the normal project creation flow.
             logger.warning("No projects found in the project list. Using 'default' project.")
             self.project_combo.addItem("default")
             self.project_combo.setCurrentIndex(0)
-            self.project_name = "default"
+            selected_project = "default"
 
         self.project_combo.blockSignals(False)
         with contextlib.suppress(TypeError, RuntimeError):
             self.project_combo.currentTextChanged.disconnect(self.on_project_combo_changed)
         self.project_combo.currentTextChanged.connect(self.on_project_combo_changed)
 
-        self.project_name = self.project_combo.currentText()
-        self.setWindowTitle(_("Enhanced Compendium - {}").format(self.project_name))
-
         # Load the compendium for the selected project so entries (e.g. Characters/Alice)
         # are shown immediately after the window is created.
-        self.change_project(self.project_name, select_default_item=True)
+        self.change_project(selected_project, select_default_item=True)
 
     def on_project_combo_changed(self, new_project: str) -> None:
         """Update the project and reload the compendium when a different project is selected."""

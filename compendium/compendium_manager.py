@@ -132,6 +132,29 @@ class CompendiumManager:
         )
 
     @staticmethod
+    def _normalize_entry_shape(entry: dict[str, Any]) -> bool:
+        """Ensure an entry dict contains the canonical unified fields and types."""
+        changed = False
+
+        if not isinstance(entry.get("content"), str):
+            entry["content"] = ""
+            changed = True
+        if not isinstance(entry.get("details"), str):
+            entry["details"] = ""
+            changed = True
+        if not isinstance(entry.get("tags"), list):
+            entry["tags"] = []
+            changed = True
+        if not isinstance(entry.get("relationships"), list):
+            entry["relationships"] = []
+            changed = True
+        if not isinstance(entry.get("images"), list):
+            entry["images"] = []
+            changed = True
+
+        return changed
+
+    @staticmethod
     def make_empty_category(name: str) -> CompendiumCategory:
         """Return a new, fully-initialised category dict."""
         return CompendiumCategory(
@@ -357,6 +380,9 @@ class CompendiumManager:
                     entry["name"] = f"Entry {entry_uuid}"
                     changed = True
 
+                if self._normalize_entry_shape(entry):
+                    changed = True
+
                 normalized_entries.append(entry)
 
             cat["entries"] = normalized_entries
@@ -517,11 +543,7 @@ class CompendiumManager:
                 entry["content"] = description
                 if "uuid" not in entry:
                     entry["uuid"] = str(uuid4())
-                # Ensure all unified fields are present on legacy entries.
-                entry.setdefault("details", "")
-                entry.setdefault("tags", [])
-                entry.setdefault("relationships", [])
-                entry.setdefault("images", [])
+                self._normalize_entry_shape(entry)
                 break
         else:
             # New character — create a fully-initialised unified entry.
@@ -899,10 +921,7 @@ class CompendiumManager:
             if entry.get("name") == name:
                 entry["content"] = description
                 entry.setdefault("uuid", str(uuid4()))
-                entry.setdefault("details", "")
-                entry.setdefault("tags", [])
-                entry.setdefault("relationships", [])
-                entry.setdefault("images", [])
+                self._normalize_entry_shape(entry)
                 self._save_data(data)
                 return entry
 
@@ -934,6 +953,5 @@ class CompendiumManager:
                     if e.get("name") == entry:
                         return e.get("content", f"[No content for {entry} in category {category}]")
         return f"[No content for {entry} in category {category}]"
-
 
 
