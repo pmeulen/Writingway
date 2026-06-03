@@ -61,6 +61,7 @@ known-first-party = [
     "compendium", "muse", "project_window",
     "settings", "util", "workshop",
 ]
+split-on-trailing-comma = false # don't split if only one import; prefer horizontal formatting
 
 [tool.ruff.format]
 quote-style = "double"
