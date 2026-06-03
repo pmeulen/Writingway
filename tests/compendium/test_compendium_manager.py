@@ -945,3 +945,134 @@ class TestPOVCharacters:
         assert retrieved["content"] == "Updated description."
 
 
+# ===========================================================================
+# Relationship UUID migration
+# ===========================================================================
+
+class TestRelationshipUUIDMigration:
+    """Verify that name-based legacy relationships are migrated to UUID-based on load."""
+
+    @pytest.mark.integration
+    def test_name_based_relationship_migrated_to_uuid(self, compendium_manager):
+        """A relationship stored with a 'name' key is converted to use 'uuid' on load."""
+        cat = compendium_manager.add_category("People")
+        alice = compendium_manager.add_entry(cat["uuid"], "Alice")
+        bob = compendium_manager.add_entry(cat["uuid"], "Bob")
+
+        # Inject a legacy name-based relationship directly into the file.
+        raw = _read_raw(compendium_manager)
+        for c in raw["categories"]:
+            for e in c["entries"]:
+                if e["name"] == "Alice":
+                    e["relationships"] = [{"name": "Bob", "type": "ally"}]
+        with open(compendium_manager._filepath, "w", encoding="utf-8") as fh:
+            json.dump(raw, fh)
+
+        # Reload — migration should convert "name" → "uuid".
+        migrated = compendium_manager._load_data()
+        alice_entry = next(
+            e for c in migrated["categories"] for e in c["entries"] if e["name"] == "Alice"
+        )
+        assert len(alice_entry["relationships"]) == 1
+        rel = alice_entry["relationships"][0]
+        assert "name" not in rel, "Legacy 'name' key must be removed after migration"
+        assert rel["uuid"] == bob["uuid"], "UUID must match Bob's entry UUID"
+        assert rel["type"] == "ally"
+
+    @pytest.mark.integration
+    def test_migrated_relationship_persisted_to_disk(self, compendium_manager):
+        """After migration the UUID-based relationship is written back to the JSON file."""
+        cat = compendium_manager.add_category("People")
+        alice = compendium_manager.add_entry(cat["uuid"], "Alice")
+        bob = compendium_manager.add_entry(cat["uuid"], "Bob")
+
+        raw = _read_raw(compendium_manager)
+        for c in raw["categories"]:
+            for e in c["entries"]:
+                if e["name"] == "Alice":
+                    e["relationships"] = [{"name": "Bob", "type": "rival"}]
+        with open(compendium_manager._filepath, "w", encoding="utf-8") as fh:
+            json.dump(raw, fh)
+
+        compendium_manager._load_data()  # triggers migration + save
+
+        on_disk = _read_raw(compendium_manager)
+        alice_on_disk = next(
+            e for c in on_disk["categories"] for e in c["entries"] if e["name"] == "Alice"
+        )
+        rel = alice_on_disk["relationships"][0]
+        assert "name" not in rel
+        assert rel["uuid"] == bob["uuid"]
+
+    @pytest.mark.integration
+    def test_unresolvable_name_based_relationship_gets_empty_uuid(self, compendium_manager):
+        """A name-based relationship pointing to a non-existent entry gets uuid=''."""
+        cat = compendium_manager.add_category("People")
+        compendium_manager.add_entry(cat["uuid"], "Alice")
+
+        raw = _read_raw(compendium_manager)
+        for c in raw["categories"]:
+            for e in c["entries"]:
+                if e["name"] == "Alice":
+                    e["relationships"] = [{"name": "GhostPerson", "type": "enemy"}]
+        with open(compendium_manager._filepath, "w", encoding="utf-8") as fh:
+            json.dump(raw, fh)
+
+        migrated = compendium_manager._load_data()
+        alice_entry = next(
+            e for c in migrated["categories"] for e in c["entries"] if e["name"] == "Alice"
+        )
+        rel = alice_entry["relationships"][0]
+        assert "name" not in rel, "Legacy 'name' key must be removed even when entry not found"
+        assert rel["uuid"] == "", "Unresolvable relationship must have uuid=''"
+        assert rel["type"] == "enemy"
+
+    @pytest.mark.integration
+    def test_existing_uuid_based_relationship_not_modified(self, compendium_manager):
+        """Relationships already using 'uuid' are passed through unchanged."""
+        cat = compendium_manager.add_category("People")
+        alice = compendium_manager.add_entry(cat["uuid"], "Alice")
+        bob = compendium_manager.add_entry(cat["uuid"], "Bob")
+
+        compendium_manager.update_entry(
+            alice["uuid"],
+            {"relationships": [{"uuid": bob["uuid"], "type": "friend"}]},
+        )
+
+        loaded = compendium_manager.get_entry_by_uuid(alice["uuid"])
+        rel = loaded["relationships"][0]
+        assert rel["uuid"] == bob["uuid"]
+        assert "name" not in rel
+
+    @pytest.mark.integration
+    def test_multiple_relationships_all_migrated(self, compendium_manager):
+        """Multiple name-based relationships in the same entry are all migrated."""
+        cat = compendium_manager.add_category("People")
+        alice = compendium_manager.add_entry(cat["uuid"], "Alice")
+        bob = compendium_manager.add_entry(cat["uuid"], "Bob")
+        carol = compendium_manager.add_entry(cat["uuid"], "Carol")
+
+        raw = _read_raw(compendium_manager)
+        for c in raw["categories"]:
+            for e in c["entries"]:
+                if e["name"] == "Alice":
+                    e["relationships"] = [
+                        {"name": "Bob", "type": "friend"},
+                        {"name": "Carol", "type": "mentor"},
+                    ]
+        with open(compendium_manager._filepath, "w", encoding="utf-8") as fh:
+            json.dump(raw, fh)
+
+        migrated = compendium_manager._load_data()
+        alice_entry = next(
+            e for c in migrated["categories"] for e in c["entries"] if e["name"] == "Alice"
+        )
+        rels = alice_entry["relationships"]
+        assert len(rels) == 2
+        uuid_set = {r["uuid"] for r in rels}
+        assert bob["uuid"] in uuid_set
+        assert carol["uuid"] in uuid_set
+        for rel in rels:
+            assert "name" not in rel
+
+

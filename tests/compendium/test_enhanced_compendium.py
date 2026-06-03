@@ -1,3 +1,6 @@
+import sys
+from types import ModuleType
+
 import pytest
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QMenu, QWidget
@@ -17,6 +20,43 @@ class _ParentStub(QWidget):
         return list(self._projects)
 
 
+def _make_fake_workbench_parent(monkeypatch: pytest.MonkeyPatch, projects: list[str]) -> QWidget:
+    """Install a fake ``workbench`` module and return a matching parent instance."""
+    fake_workbench = ModuleType("workbench")
+
+    class FakeWorkbenchWindow(QWidget):
+        def __init__(self, project_names: list[str]):
+            super().__init__()
+            self._projects = list(project_names)
+
+        def get_project_list(self) -> list[str]:
+            return list(self._projects)
+
+    fake_workbench.WorkbenchWindow = FakeWorkbenchWindow
+    monkeypatch.setitem(sys.modules, "workbench", fake_workbench)
+    return FakeWorkbenchWindow(projects)
+
+
+def _install_default_fake_workbench() -> type[QWidget]:
+    """Install a module-level fake ``workbench`` module used by most tests."""
+    fake_workbench = ModuleType("workbench")
+
+    class FakeWorkbenchWindow(QWidget):
+        def __init__(self, project_names: list[str] | None = None) -> None:
+            super().__init__()
+            self._projects = list(project_names or ["default"])
+
+        def get_project_list(self) -> list[str]:
+            return list(self._projects)
+
+    fake_workbench.WorkbenchWindow = FakeWorkbenchWindow
+    sys.modules["workbench"] = fake_workbench
+    return FakeWorkbenchWindow
+
+
+_DefaultFakeWorkbenchWindow = _install_default_fake_workbench()
+
+
 @pytest.mark.qt
 @pytest.mark.integration
 def test_move_entry_rebuilds_tree_and_reselects_entry(isolated_cwd, qtbot, monkeypatch):
@@ -31,11 +71,12 @@ def test_move_entry_rebuilds_tree_and_reselects_entry(isolated_cwd, qtbot, monke
     target_category = manager.add_category("Cats")
     entry = manager.add_entry(source_category_uuid, "Alice", "A clever woman")
 
-    # Ensure the enhanced window listens on the same global event bus as production.
-    parent = _ParentStub([project_name])
+
+    parent = _make_fake_workbench_parent(monkeypatch, [project_name])
     qtbot.addWidget(parent)
     window = EnhancedCompendiumWindow(parent=parent)
     qtbot.addWidget(window)
+
 
     # Select the initial entry so move_entry receives a real tree item.
     assert window._find_and_select_entry_by_uuid(entry["uuid"])
@@ -92,9 +133,9 @@ def _write_compendium(root: Path):
         json.dump(data, f, indent=2)
 
 
-class DummyParent(QWidget):
-    def get_project_list(self):
-        return ["default"]
+class DummyParent(_DefaultFakeWorkbenchWindow):
+    def __init__(self, projects: list[str] | None = None) -> None:
+        super().__init__(projects or ["default"])
 
 
 def _find_alice_item(tree):
@@ -115,7 +156,7 @@ def _load_alice(win, qtbot):
     win.tree.setCurrentItem(alice_item)
     qtbot.wait(50)
     # Guard: call load_entry directly if the async selection handler hasn't fired yet.
-    if getattr(win, "current_entry", None) != "Alice":
+    if win.current_entry_item is None or win.current_entry_item.text(0) != "Alice":
         win.load_entry(alice_item.text(0), alice_item)
     return alice_item
 
@@ -212,7 +253,7 @@ def test_cancelled_selection_keeps_current_on_right_click(qtbot, isolated_cwd, m
     # state is correct (this avoids flaky timing differences on CI).
     tree.setCurrentItem(alice_item)
     qtbot.wait(50)
-    if getattr(win, 'current_entry', None) != 'Alice':
+    if win.current_entry_item is None or win.current_entry_item.text(0) != 'Alice':
         win.load_entry(alice_item.text(0), alice_item)
     # Modify content to set dirty flag
     win.editor.setPlainText(win.editor.toPlainText() + " edited")
@@ -260,7 +301,7 @@ def test_cancelled_selection_keeps_current_on_left_click(qtbot, isolated_cwd, mo
     # Select Alice and make it dirty. See comment above for timing handling.
     tree.setCurrentItem(alice_item)
     qtbot.wait(50)
-    if getattr(win, 'current_entry', None) != 'Alice':
+    if win.current_entry_item is None or win.current_entry_item.text(0) != 'Alice':
         win.load_entry(alice_item.text(0), alice_item)
     # Modify content to set dirty flag
     win.editor.setPlainText(win.editor.toPlainText() + " edited")
@@ -305,7 +346,7 @@ def test_move_entry_aborted_when_user_cancels_guard(qtbot, isolated_cwd, monkeyp
     # Select Alice and make it dirty. See comment above for timing handling.
     tree.setCurrentItem(alice_item)
     qtbot.wait(50)
-    if getattr(win, 'current_entry', None) != 'Alice':
+    if win.current_entry_item is None or win.current_entry_item.text(0) != 'Alice':
         win.load_entry(alice_item.text(0), alice_item)
     win.editor.setPlainText(win.editor.toPlainText() + " edited")
     assert win.is_dirty()
@@ -366,12 +407,12 @@ def test_guard_save_branch_persists_dirty_entry_then_loads_clicked_entry(qtbot, 
     qtbot.mouseClick(win.tree.viewport(), Qt.LeftButton, pos=QPoint(center.x(), center.y()))
     qtbot.wait(100)
 
-    if getattr(win, "current_entry", None) != "Bob":
+    if win.current_entry_item is None or win.current_entry_item.text(0) != "Bob":
         current_item = win.tree.currentItem()
         if current_item is not None and current_item.data(0, Qt.UserRole) == "entry" and current_item.text(0) == "Bob":
             win.load_entry(current_item.text(0), current_item)
 
-    assert getattr(win, "current_entry", None) == "Bob"
+    assert win.current_entry_item is not None and win.current_entry_item.text(0) == "Bob"
     assert win.editor.toPlainText() == "Bob content"
     assert not win.is_dirty()
     assert not win.save_button.isEnabled()
@@ -431,12 +472,12 @@ def test_guard_discard_branch_keeps_disk_state_and_loads_clicked_entry(qtbot, is
     qtbot.mouseClick(win.tree.viewport(), Qt.LeftButton, pos=QPoint(center.x(), center.y()))
     qtbot.wait(100)
 
-    if getattr(win, "current_entry", None) != "Bob":
+    if win.current_entry_item is None or win.current_entry_item.text(0) != "Bob":
         current_item = win.tree.currentItem()
         if current_item is not None and current_item.data(0, Qt.UserRole) == "entry" and current_item.text(0) == "Bob":
             win.load_entry(current_item.text(0), current_item)
 
-    assert getattr(win, "current_entry", None) == "Bob"
+    assert win.current_entry_item is not None and win.current_entry_item.text(0) == "Bob"
     assert win.editor.toPlainText() == "Bob content"
     assert not win.is_dirty()
     assert not win.save_button.isEnabled()
@@ -481,7 +522,7 @@ def test_context_menu_not_shown_when_selection_cancelled(qtbot, isolated_cwd, mo
     # Select Alice and make it dirty
     tree.setCurrentItem(alice_item)
     qtbot.wait(50)
-    if getattr(win, 'current_entry', None) != 'Alice':
+    if win.current_entry_item is None or win.current_entry_item.text(0) != 'Alice':
         win.load_entry(alice_item.text(0), alice_item)
     win.editor.setPlainText(win.editor.toPlainText() + " edited")
     assert win.is_dirty()
@@ -519,7 +560,7 @@ def test_delete_entry_yes_removes_entry_from_tree_and_disk_and_clears_ui(qtbot, 
     qtbot.waitExposed(win)
 
     alice_item = _load_alice(win, qtbot)
-    assert getattr(win, "current_entry", None) == "Alice"
+    assert win.current_entry_item is not None and win.current_entry_item.text(0) == "Alice"
 
     def _confirm_delete(parent, title, text, buttons, default=None, **kw):
         if "Confirm Deletion" in title:
@@ -547,7 +588,7 @@ def test_delete_entry_yes_removes_entry_from_tree_and_disk_and_clears_ui(qtbot, 
     assert "Bob" in disk_names
 
     assert win.entry_name_label.text() == "No entry selected"
-    assert not hasattr(win, "current_entry")
+    assert win.current_entry_item is None
     assert not win.save_button.isVisible()
     assert not win.revert_button.isVisible()
     _silence_close_guard(win, monkeypatch)
@@ -626,7 +667,7 @@ def test_delete_category_yes_removes_category_and_entries_from_tree_and_disk(qtb
     assert data["categories"] == []
 
     assert win.entry_name_label.text() == "No entry selected"
-    assert not hasattr(win, "current_entry")
+    assert win.current_entry_item is None
     assert not win.save_button.isVisible()
     assert not win.revert_button.isVisible()
     _silence_close_guard(win, monkeypatch)
@@ -947,7 +988,7 @@ def test_selecting_entry_loads_editor_content(qtbot, isolated_cwd):
     tree.setCurrentItem(alice_item)
     qtbot.wait(50)
 
-    assert getattr(win, "current_entry", None) == "Alice"
+    assert win.current_entry_item is not None and win.current_entry_item.text(0) == "Alice"
     assert win.entry_name_label.text() == "Alice"
     assert win.editor.toPlainText() == "Alice content"
 
@@ -1281,6 +1322,230 @@ def test_revert_button_cancel_keeps_dirty_edit(qtbot, isolated_cwd, monkeypatch)
 
     # Silence the close guard so qtbot teardown doesn't block: the entry is
     # intentionally left dirty and the guard is not part of this test.
+    _silence_close_guard(win, monkeypatch)
+
+
+# ---------------------------------------------------------------------------
+# Relationship UUID handling
+# ---------------------------------------------------------------------------
+
+
+def _write_compendium_with_relationships(root: Path) -> dict:
+    """Write a compendium where Alice has a UUID-based relationship to Bob.
+
+    Returns a dict with ``alice_uuid`` and ``bob_uuid`` for assertion use.
+    """
+    projects = root / "Projects"
+    projects.mkdir(exist_ok=True)
+    default = projects / "default"
+    default.mkdir(exist_ok=True)
+    alice_uuid = "rel-e1"
+    bob_uuid = "rel-e2"
+    data = {
+        "version": 3,
+        "categories": [
+            {
+                "name": "Characters",
+                "uuid": "rel-cat-1",
+                "entries": [
+                    {
+                        "name": "Alice",
+                        "uuid": alice_uuid,
+                        "content": "Alice content",
+                        "details": "",
+                        "tags": [],
+                        "relationships": [{"uuid": bob_uuid, "type": "friend"}],
+                        "images": [],
+                    },
+                    {
+                        "name": "Bob",
+                        "uuid": bob_uuid,
+                        "content": "Bob content",
+                        "details": "",
+                        "tags": [],
+                        "relationships": [],
+                        "images": [],
+                    },
+                ],
+            }
+        ],
+    }
+    with open(default / "compendium.json", "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    return {"alice_uuid": alice_uuid, "bob_uuid": bob_uuid}
+
+
+def _write_compendium_with_legacy_relationships(root: Path) -> dict:
+    """Write a compendium where Alice has a *name*-based (legacy) relationship to Bob."""
+    projects = root / "Projects"
+    projects.mkdir(exist_ok=True)
+    default = projects / "default"
+    default.mkdir(exist_ok=True)
+    alice_uuid = "leg-e1"
+    bob_uuid = "leg-e2"
+    data = {
+        "version": 3,
+        "categories": [
+            {
+                "name": "Characters",
+                "uuid": "leg-cat-1",
+                "entries": [
+                    {
+                        "name": "Alice",
+                        "uuid": alice_uuid,
+                        "content": "Alice content",
+                        "details": "",
+                        "tags": [],
+                        # Legacy format: 'name' instead of 'uuid'
+                        "relationships": [{"name": "Bob", "type": "rival"}],
+                        "images": [],
+                    },
+                    {
+                        "name": "Bob",
+                        "uuid": bob_uuid,
+                        "content": "Bob content",
+                        "details": "",
+                        "tags": [],
+                        "relationships": [],
+                        "images": [],
+                    },
+                ],
+            }
+        ],
+    }
+    with open(default / "compendium.json", "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    return {"alice_uuid": alice_uuid, "bob_uuid": bob_uuid}
+
+
+def _select_relationships_tab(win, qtbot) -> None:
+    """Switch to the Relationships tab in *win*."""
+    for i in range(win.tabs.count()):
+        if "Rel" in win.tabs.tabText(i):
+            win.tabs.setCurrentIndex(i)
+            break
+    qtbot.wait(50)
+
+
+@pytest.mark.qt
+def test_load_entry_uuid_relationship_shows_name(qtbot, isolated_cwd, monkeypatch):
+    """Loading an entry with a UUID-based relationship displays the related entry's name."""
+    uuids = _write_compendium_with_relationships(Path(isolated_cwd))
+    parent = DummyParent()
+    win = EnhancedCompendiumWindow(parent=parent)
+    qtbot.addWidget(win)
+    win.show()
+    qtbot.waitExposed(win)
+
+    _patch_guard_detection(monkeypatch)
+    _load_alice(win, qtbot)
+    _select_relationships_tab(win, qtbot)
+
+    assert win.relationships_list.topLevelItemCount() == 1
+    rel_item = win.relationships_list.topLevelItem(0)
+    # The list should *display* the name, not the UUID.
+    assert rel_item.text(0) == "Bob"
+    # The UUID is stored in UserRole for save round-trip.
+    assert rel_item.data(0, Qt.ItemDataRole.UserRole) == uuids["bob_uuid"]
+    assert rel_item.text(1) == "friend"
+
+    _silence_close_guard(win, monkeypatch)
+
+
+@pytest.mark.qt
+def test_save_entry_persists_relationship_as_uuid(qtbot, isolated_cwd, monkeypatch):
+    """Saving an entry writes UUID-based relationships to disk, never the character name."""
+    uuids = _write_compendium_with_relationships(Path(isolated_cwd))
+    parent = DummyParent()
+    win = EnhancedCompendiumWindow(parent=parent)
+    qtbot.addWidget(win)
+    win.show()
+    qtbot.waitExposed(win)
+
+    _patch_guard_detection(monkeypatch)
+    _load_alice(win, qtbot)
+
+    # Make entry dirty so save is meaningful.
+    win.editor.setPlainText("Alice content – edited for save test")
+    assert win.is_dirty()
+    win.save_button.click()
+    qtbot.wait(50)
+
+    compendium_path = Path(isolated_cwd) / "Projects" / "default" / "compendium.json"
+    with open(compendium_path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    alice_entry = next(
+        e for cat in data["categories"] for e in cat["entries"] if e["name"] == "Alice"
+    )
+    assert len(alice_entry["relationships"]) == 1
+    rel = alice_entry["relationships"][0]
+    assert "uuid" in rel, "Relationship must be stored with 'uuid' key"
+    assert rel["uuid"] == uuids["bob_uuid"]
+    assert "name" not in rel, "Relationship must NOT be stored with legacy 'name' key"
+    assert rel["type"] == "friend"
+
+
+@pytest.mark.qt
+def test_legacy_name_based_relationship_displays_gracefully(qtbot, isolated_cwd, monkeypatch):
+    """An unmigrated name-based relationship is shown by name in the UI (not as blank)."""
+    # Write legacy data that bypasses the manager's migration by being loaded directly.
+    uuids = _write_compendium_with_legacy_relationships(Path(isolated_cwd))
+    parent = DummyParent()
+    win = EnhancedCompendiumWindow(parent=parent)
+    qtbot.addWidget(win)
+    win.show()
+    qtbot.waitExposed(win)
+
+    # The manager runs migration on load, converting name→uuid.  After migration the
+    # relationship should display Bob's name (resolved from the migrated UUID).
+    _patch_guard_detection(monkeypatch)
+    _load_alice(win, qtbot)
+    _select_relationships_tab(win, qtbot)
+
+    assert win.relationships_list.topLevelItemCount() == 1
+    rel_item = win.relationships_list.topLevelItem(0)
+    # Post-migration display: Bob's name must be shown.
+    assert rel_item.text(0) == "Bob"
+    assert rel_item.text(1) == "rival"
+
+    _silence_close_guard(win, monkeypatch)
+
+
+@pytest.mark.qt
+def test_add_relationship_stores_uuid_not_name(qtbot, isolated_cwd, monkeypatch):
+    """Adding a relationship via the UI combo stores the UUID, not the character name."""
+    _write_compendium(Path(isolated_cwd))
+    parent = DummyParent()
+    win = EnhancedCompendiumWindow(parent=parent)
+    qtbot.addWidget(win)
+    win.show()
+    qtbot.waitExposed(win)
+
+    _patch_guard_detection(monkeypatch)
+    _load_alice(win, qtbot)
+    _select_relationships_tab(win, qtbot)
+
+    # Select "Bob" in the relationship combo.
+    for i in range(win.relationship_combo.count()):
+        if win.relationship_combo.itemText(i) == "Bob":
+            win.relationship_combo.setCurrentIndex(i)
+            break
+    bob_uuid_from_combo = win.relationship_combo.currentData()
+    assert bob_uuid_from_combo, "Combo should store Bob's UUID as item data"
+
+    win.relationship_type.setText("ally")
+    win.add_relationship_button.click()
+    qtbot.wait(50)
+
+    # The relationships_list should have exactly one item.
+    assert win.relationships_list.topLevelItemCount() == 1
+    rel_item = win.relationships_list.topLevelItem(0)
+    # Displayed as name, stored as UUID.
+    assert rel_item.text(0) == "Bob"
+    stored_uuid = rel_item.data(0, Qt.ItemDataRole.UserRole)
+    assert stored_uuid == bob_uuid_from_combo
+    assert stored_uuid != "Bob", "UUID must not equal the character name"
+
     _silence_close_guard(win, monkeypatch)
 
 

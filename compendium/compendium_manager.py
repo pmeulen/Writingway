@@ -1,13 +1,24 @@
 import json
+import logging
 import os
 import re
 import weakref
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
+
+logger = logging.getLogger(__name__)
 
 from PyQt5.QtWidgets import QMessageBox
 
+from compendium.compendium_types import (
+    CategorySummary,
+    CompendiumCategory,
+    CompendiumData,
+    CompendiumEntry,
+    EntryWithContext,
+    PovCharacter,
+)
 from settings.settings_manager import WWSettingsManager
 
 
@@ -41,7 +52,7 @@ class CompendiumEventBus:
             try:
                 callback(project_name)
             except Exception as e:
-                print(f"Error in compendium updated listener: {e}")
+                logger.error(f"Error in compendium updated listener: {e}")
                 self.remove_updated_listener(callback)
 
     def _cleanup_dead_listeners(self):
@@ -53,31 +64,6 @@ class CompendiumEventBus:
         for cb in to_remove:
             self.remove_updated_listener(cb)
 
-# ---------------------------------------------------------------------------
-# Data model
-# ---------------------------------------------------------------------------
-# Compendium data is stored in <project>/compendium.json as a single unified
-# section:
-#
-#   "categories": [
-#       {
-#         "name": str,               ← category name
-#         "entries": [               ← entries in this category
-#         {
-#           "name",
-#           "content",
-#           "uuid",
-#           "details",
-#           "tags": [],
-#           "relationships": [],
-#           "images": []
-#   } ] } ]
-#
-# Legacy "split" format (extensions section keyed by entry name) is
-# migrated automatically on first load; the extensions section is then
-# removed and the file is re-saved in unified format.
-# ---------------------------------------------------------------------------
-
 
 class CompendiumManager:
     """
@@ -85,42 +71,81 @@ class CompendiumManager:
     project's compendium.
     """
 
+    # ---------------------------------------------------------------------------
+    # Data model version 3
+    # ---------------------------------------------------------------------------
+    # Compendium data is stored in <project>/compendium.json as a single unified
+    # section:
+    #   {
+    #   "version": int,               # data model version (current: 3, default: 1)
+    #   "categories": [
+    #       {
+    #         "name": str,            # category name
+    #         "uuid": str,            # category uuid
+    #         "entries": [            # entries in this category
+    #         {
+    #           "name",               # entry name
+    #           "uuid",               # entry uuid
+    #           "content",            # entry content. Sent to the LLM
+    #           "details",            # entry details. For the user. Not sent to the LLM
+    #           "tags": [             # list of tags
+    #             {
+    #               "name": str,      # tag name
+    #               "color": str      # tag color. Hex code, e.g. "#ff0000"
+    #             }
+    #           ],
+    #           "relationships": [    # list of relationships to other entries.
+    #             {
+    #               "uuid": str       # uuid of the related entry
+    #               "type": str       # relationship type with the related entry, e.g. "parent", "ally"
+    #              }
+    #           ],
+    #           "images": [
+    #             str,                # path to the image file on disk
+    #           ]
+    #   } ] } ]
+    #
+    # Legacy v2 "split" format (extensions section keyed by entry name) is
+    # migrated automatically on first load; the extensions section is then
+    # removed and the file is re-saved in unified format.
+    # ---------------------------------------------------------------------------
+
     # ------------------------------------------------------------------
     # Canonical structure factories
     # ------------------------------------------------------------------
 
     @staticmethod
-    def make_empty_entry(name: str, content: str = "") -> dict[str, Any]:
+    def make_empty_entry(name: str, content: str = "") -> CompendiumEntry:
         """Return a new, fully-initialised entry dict in the unified format.
 
         All callers that need to create an entry should use this factory so
         that the canonical set of fields is defined in exactly one place.
-
-        Returns:
-            dict: ``{"name", "content", "uuid", "details", "tags", "relationships", "images"}``
         """
-        return {
-            "name": name,
-            "content": content,
-            "uuid": str(uuid4()),
-            "details": "",
-            "tags": [],
-            "relationships": [],
-            "images": [],
-        }
+        return CompendiumEntry(
+            name=name,
+            content=content,
+            uuid=str(uuid4()),
+            details="",
+            tags=[],
+            relationships=[],
+            images=[],
+        )
 
     @staticmethod
-    def make_empty_category(name: str) -> dict[str, Any]:
-        """Return a new, fully-initialised category dict.
+    def make_empty_category(name: str) -> CompendiumCategory:
+        """Return a new, fully-initialised category dict."""
+        return CompendiumCategory(
+            name=name,
+            uuid=str(uuid4()),
+            entries=[],
+        )
 
-        Returns:
-            dict: ``{"name", "uuid", "entries"}``
-        """
-        return {
-            "name": name,
-            "uuid": str(uuid4()),
-            "entries": [],
-        }
+    def make_empty_compendium(self) -> CompendiumData:
+        """Return a new, fully-initialised compendium dict."""
+        return CompendiumData(
+            version=3,
+            categories=[self.make_empty_category("Characters")],
+        )
 
     def __init__(self, project_name: str | None = None, event_bus: CompendiumEventBus | None = None):
         """
@@ -133,6 +158,7 @@ class CompendiumManager:
         self.event_bus = event_bus
         self._filepath = self._get_filepath()
         self._ensure_file_exists()
+        self._show_new_version_warning = True
 
     def _get_filepath(self) -> str:
         """
@@ -149,7 +175,7 @@ class CompendiumManager:
         """Ensure the compendium file exists, creating a default one if necessary."""
         if not os.path.exists(self._filepath):
             os.makedirs(os.path.dirname(self._filepath), exist_ok=True)
-            default_data = {
+            default_data: CompendiumData = {
                 "version": 3,
                 "categories": [self.make_empty_category("Characters")],
             }
@@ -185,7 +211,7 @@ class CompendiumManager:
 
         return backup_path
 
-    def _load_data(self) -> dict[str, Any]:
+    def _load_data(self) -> CompendiumData:
         """
         Load compendium data from the project-specific file, converting legacy formats if needed.
         Warns the user when loading a file with a newer version than the code supports,
@@ -199,56 +225,40 @@ class CompendiumManager:
 
         changed = False
         current_version = 3
-
-        default_compendium_data: dict[str, Any] = {
-            "categories": [
-                {
-                    "version": current_version,
-                    "name": "Characters",
-                    "uuid": str(uuid4()),
-                 "entries": [
-                     {
-                         "name": "Alice",
-                         "uuid": str(uuid4()),
-                         "content": "A brave adventurer.",
-                         "tags": [],
-                         "relations": [],
-                         "images": [],
-                     }
-                 ],
-                 },
-            ],
-        }
+        data = None
 
         try:
             with open(self._filepath, encoding="utf-8") as f:
                 data = json.load(f)
         except json.JSONDecodeError as e:
-            print(f"Error decoding JSON from {self._filepath}: {e}. Initializing a new compendium.")
-            data = default_compendium_data
+            logger.error(f"Error decoding JSON from {self._filepath}: {e}. Initializing a new compendium.")
+            data = self.make_empty_compendium()
             changed = True
         except Exception as e:
-            print(f"Error loading compendium data from {self._filepath}: {e}. . Initializing a new compendium.")
-            data = default_compendium_data
+            logger.error(f"Error loading compendium data from {self._filepath}: {e}. Initializing a new compendium.")
+            data = self.make_empty_compendium()
             changed = True
 
         if not isinstance(data, dict):
-            print(f"Invalid compendium payload in {self._filepath}. Initializing a new compendium.")
-            data = default_compendium_data
+            logger.warning(f"Invalid compendium payload in {self._filepath}. Initializing a new compendium.")
+            data = self.make_empty_compendium()
             changed = True
 
         # Check if file version is newer than what this code understands.
         version = data.get("version", 1)
         if isinstance(version, int) and version > current_version:
-            print(f"Warning: Compendium data version {version} is newer than supported version {current_version}.")
+            logger.warning(f"Compendium data version {version} is newer than supported version {current_version}.")
+            if self._show_new_version_warning:
+                msg = (
+                    f"Compendium data version {version} is newer than the supported version {current_version}.\n\n"
+                    "Compendium functionality may not work correctly with this application version.\n"
+                    "If you continue and save the compendium, you may lose data.\n\n"
+                    f"File: {self._filepath}"
+                )
+                QMessageBox.warning(None, "Compendium version mismatch", msg, QMessageBox.Ok)
 
-            msg = (
-                f"Compendium data version {version} is newer than the supported version {current_version}.\n\n"
-                "Compendium functionality may not work correctly with this application version.\n"
-                "If you continue and save the compendium, you may lose data.\n\n"
-                f"File: {self._filepath}"
-            )
-            QMessageBox.warning(None, "Compendium version mismatch", msg, QMessageBox.Ok)
+                # Show warning only once per project session
+                self._show_new_version_warning=False
 
             # Don't attempt convert the data, since we don't know the format. Return as-is.
             return data
@@ -259,10 +269,10 @@ class CompendiumManager:
             data["categories"] = []
             changed = True
 
-        # Convert legacy dict format to list of categories
+        # Convert legacy dict format (version 1) to list of categories
         categories_dict = data.get("categories")
         if isinstance(categories_dict, dict):
-            print("Converting compendium legacy dict format to list of categories")
+            logger.info("Converting compendium legacy dict format to list of categories")
             new_categories = [
                 {"name": cat, "entries": [
                     {"name": name, "content": content, "uuid": str(uuid4())}
@@ -290,7 +300,7 @@ class CompendiumManager:
             cat_uuid_value = cat.get("uuid")
             cat_uuid = cat_uuid_value if isinstance(cat_uuid_value, str) and cat_uuid_value else ""
             if not cat_uuid:
-                print("Fixing compendium category missing UUID")
+                logger.info("Fixing compendium category missing UUID")
                 cat_uuid = str(uuid4())
                 cat["uuid"] = cat_uuid
                 changed = True
@@ -298,7 +308,7 @@ class CompendiumManager:
             # If category has no uuid, give it one
             if cat_uuid in seen_uuids:
                 new_uuid = str(uuid4())
-                print(f"UUID {cat_uuid} is already used by another compendium category. Assigning UUID {new_uuid}")
+                logger.warning(f"UUID {cat_uuid} is already used by another compendium category. Assigning UUID {new_uuid}")
                 cat["uuid"] = new_uuid
                 cat_uuid = new_uuid
                 changed = True
@@ -325,7 +335,7 @@ class CompendiumManager:
                 entry_uuid_value = entry.get("uuid")
                 entry_uuid = entry_uuid_value if isinstance(entry_uuid_value, str) and entry_uuid_value else ""
                 if not entry_uuid:
-                    print("Fixing compendium entry missing UUID")
+                    logger.info("Fixing compendium entry missing UUID")
                     entry_uuid = str(uuid4())
                     entry["uuid"] = entry_uuid
                     changed = True
@@ -334,7 +344,7 @@ class CompendiumManager:
                 if entry_uuid in seen_uuids:
                     # Duplicate uuid found
                     new_uuid = str(uuid4())
-                    print(f"UUID {entry_uuid} is already used by another compendium entry. Assigning UUID {new_uuid}")
+                    logger.warning(f"UUID {entry_uuid} is already used by another compendium entry. Assigning UUID {new_uuid}")
                     entry["uuid"] = new_uuid
                     entry_uuid = new_uuid
                     changed = True
@@ -354,9 +364,40 @@ class CompendiumManager:
 
         data["categories"] = normalized_categories
 
+        # Migrate name-based relationships to UUID-based.
+        # Legacy data (written by ai_compendium_dialog) uses {"name": str, "type": str}.
+        # The canonical format uses {"uuid": str, "type": str}.
+        name_to_uuid: dict[str, str] = {
+            entry.get("name", ""): entry.get("uuid", "")
+            for cat in data.get("categories", [])
+            for entry in cat.get("entries", [])
+            if entry.get("name") and entry.get("uuid")
+        }
+        for cat in data.get("categories", []):
+            for entry in cat.get("entries", []):
+                for rel in entry.get("relationships", []):
+                    if not isinstance(rel, dict):
+                        continue
+                    if "uuid" not in rel and "name" in rel:
+                        rel_name = rel.get("name", "")
+                        resolved_uuid = name_to_uuid.get(rel_name, "")
+                        rel["uuid"] = resolved_uuid
+                        del rel["name"]
+                        changed = True
+                        if resolved_uuid:
+                            logger.info(
+                                f"Migrated name-based relationship '{rel_name}' "
+                                f"to UUID '{resolved_uuid}'"
+                            )
+                        else:
+                            logger.warning(
+                                f"Could not resolve relationship name "
+                                f"'{rel_name}' to UUID; related entry may have been deleted"
+                            )
+
         if "extensions" in data:
             # Migrate from format with extensions to unified format
-            print("Converting compendium from format with extensions to unified format")
+            logger.info("Converting compendium from format with extensions to unified format")
             changed = True
 
             # Build lookup from extensions -> entries
@@ -396,17 +437,25 @@ class CompendiumManager:
             # Create a backup of the old file before saving the new one, to prevent of data loss because of bugs in
             # the conversion code
             backup_name = self._backup_compendium_data()
-            print(f"Backed up compendium data to {backup_name}")
+            logger.info(f"Backed up compendium data to {backup_name}")
             # Internal migration/normalization writes should not re-enter UI listeners.
-            compendium_name = self._save_data(data, notify=False)
-            print(f"Saved compendium data to {compendium_name}")
+            compendium_name = self._save_data(cast(CompendiumData, data), notify=False)
+            logger.info(f"Saved compendium data to {compendium_name}")
 
-        return data
+        return cast(CompendiumData, data)
 
-    def load_data(self) -> dict[str, Any]:
+    def load_data(self) -> CompendiumData:
+        """Load compendium data from file.
+        It is automatically converted from an older format to version 3 format.
+        Newer file format versions are not converted and are loaded as-is with a warning.
+
+        """
+        # TODO: We may want to add a cache to prevent loading the data each time
+
+        # Load data from disk, converting legacy format if necessary.
         return self._load_data()
 
-    def _save_data(self, compendium_data: dict[str, Any], notify: bool = True) -> str:
+    def _save_data(self, compendium_data: CompendiumData, notify: bool = True) -> str:
         """
         Save compendium data to the file.
         Return filename
@@ -421,7 +470,7 @@ class CompendiumManager:
             if notify and self.event_bus and isinstance(self.project_name, str):
                 self.event_bus.notify_updated(self.project_name)
         except Exception as e:
-            print(f"Error saving compendium data to {self._filepath}: {e}")
+            logger.error(f"Error saving compendium data to {self._filepath}: {e}")
 
         return self._filepath
 
@@ -439,13 +488,13 @@ class CompendiumManager:
         refs = []
         try:
             data = self._load_data()
-            names = [entry.get("name", "") for cat in data.get("categories", [])
+            names: list[str] = [entry.get("name", "") for cat in data.get("categories", [])
                      for entry in cat.get("entries", [])]
             for name in names:
                 if name and re.search(r'\b' + re.escape(name) + r'\b', message, re.IGNORECASE):
                     refs.append(name)
         except Exception as e:
-            print(f"Error parsing compendium references: {e}")
+            logger.error(f"Error parsing compendium references: {e}")
         return refs
 
     def add_character(self, name: str, description: str) -> None:
@@ -479,13 +528,11 @@ class CompendiumManager:
             characters_cat["entries"].append(self.make_empty_entry(name, description))
         self._save_data(compendium_data)
 
-    def upsert_data(self, compendium_data: dict[str, Any]) -> None:
+    def upsert_data(self, compendium_data: CompendiumData) -> None:
         """Merge compendium_data with the existing compendium content.
 
         Both the incoming data and the stored data are expected to be in the
-        unified format (all entry fields inline; no ``extensions`` section).
-        Any ``extensions`` key present in the incoming data is ignored so that
-        callers cannot accidentally re-introduce the legacy split format.
+        unified format. The `extenstions` format is not supported and data under this key is ignored.
         """
         existing_data = self._load_data()
 
@@ -512,17 +559,17 @@ class CompendiumManager:
     # Query methods
     # ------------------------------------------------------------------
 
-    def list_categories(self) -> list[dict[str, str]]:
+    def list_categories(self) -> list[CategorySummary]:
         """Return a summary list of all categories.
 
         Returns:
-            list of ``{"name": str, "uuid": str}`` dicts (in display order).
+            list of ``CategorySummary`` dicts (in display order).
         """
         data = self._load_data()
-        return [{"name": cat.get("name", ""), "uuid": cat.get("uuid", "")}
+        return [CategorySummary(name=cat.get("name", ""), uuid=cat.get("uuid", ""))
                 for cat in data.get("categories", [])]
 
-    def get_category_by_uuid(self, category_uuid: str) -> dict[str, Any] | None:
+    def get_category_by_uuid(self, category_uuid: str) -> CompendiumCategory | None:
         """Return the full category dict (including its ``entries`` list) for *category_uuid*.
 
         Returns:
@@ -534,7 +581,7 @@ class CompendiumManager:
                 return cat
         return None
 
-    def list_entries(self, category_uuid: str) -> list[dict[str, Any]]:
+    def list_entries(self, category_uuid: str) -> list[CompendiumEntry]:
         """Return all entry dicts for the category identified by *category_uuid*.
 
         Returns:
@@ -543,7 +590,7 @@ class CompendiumManager:
         cat = self.get_category_by_uuid(category_uuid)
         return cat.get("entries", []) if cat else []
 
-    def get_entry_by_uuid(self, entry_uuid: str) -> dict[str, Any] | None:
+    def get_entry_by_uuid(self, entry_uuid: str) -> CompendiumEntry | None:
         """Return the entry dict whose ``uuid`` matches *entry_uuid*, or ``None``."""
         data = self._load_data()
         for cat in data.get("categories", []):
@@ -552,26 +599,25 @@ class CompendiumManager:
                     return entry
         return None
 
-    def find_categories(self, search_text: str = "") -> dict[str, dict[str, Any]]:
+    def find_categories(self, search_text: str = "") -> dict[str, CategorySummary]:
         """Return categories whose name contains *search_text*, keyed by UUID.
 
-        An empty *search_text* returns every category.  Each value is a summary
-        dict ``{"name": str, "uuid": str}`` — **not** the full category with entries.
+        An empty *search_text* returns every category.
 
         Returns:
-            ``{category_uuid: {"name": str, "uuid": str}, ...}``
+            ``{category_uuid: CategorySummary, ...}``
         """
         lower = search_text.lower()
         data = self._load_data()
-        results: dict[str, dict[str, Any]] = {}
+        results: dict[str, CategorySummary] = {}
         for cat in data.get("categories", []):
             cat_name = cat.get("name", "")
             if not lower or lower in cat_name.lower():
                 uuid = cat.get("uuid", "")
-                results[uuid] = {"name": cat_name, "uuid": uuid}
+                results[uuid] = CategorySummary(name=cat_name, uuid=uuid)
         return results
 
-    def find_entries(self, search_text: str = "") -> dict[str, dict[str, Any]]:
+    def find_entries(self, search_text: str = "") -> dict[str, EntryWithContext]:
         """Return entries whose name or tag names contain *search_text*, keyed by UUID.
 
         An empty *search_text* returns every entry.  Each value contains all
@@ -579,11 +625,11 @@ class CompendiumManager:
         key for the containing category.
 
         Returns:
-            ``{entry_uuid: {entry fields, "category_uuid": str, "category_name": str}, ...}``
+            ``{entry_uuid: EntryWithContext, ...}``
         """
         lower = search_text.lower()
         data = self._load_data()
-        results: dict[str, dict[str, Any]] = {}
+        results: dict[str, EntryWithContext] = {}
         for cat in data.get("categories", []):
             cat_name = cat.get("name", "")
             cat_uuid = cat.get("uuid", "")
@@ -595,7 +641,11 @@ class CompendiumManager:
                 ]
                 if not lower or lower in entry_name or any(lower in t for t in tag_names):
                     entry_uuid = entry.get("uuid", "")
-                    results[entry_uuid] = {"category_uuid": cat_uuid, "category_name": cat_name, **entry}
+                    results[entry_uuid] = EntryWithContext(
+                        category_uuid=cat_uuid,
+                        category_name=cat_name,
+                        **entry,  # type: ignore[arg-type]
+                    )
         return results
 
     def get_summary_for_prompt(self) -> str:
@@ -634,7 +684,7 @@ class CompendiumManager:
 
     # --- Categories ---
 
-    def add_category(self, name: str) -> dict[str, Any]:
+    def add_category(self, name: str) -> CompendiumCategory:
         """Create and persist a new category.
 
         Returns:
@@ -676,7 +726,7 @@ class CompendiumManager:
 
     # --- Entries ---
 
-    def add_entry(self, category_uuid: str, name: str, content: str = "") -> dict[str, Any] | None:
+    def add_entry(self, category_uuid: str, name: str, content: str = "") -> CompendiumEntry | None:
         """Add a new entry to the category identified by *category_uuid*.
 
         Returns:
@@ -707,7 +757,7 @@ class CompendiumManager:
                     return True
         return False
 
-    def update_entry(self, entry_uuid: str, fields: dict[str, Any]) -> bool:
+    def update_entry(self, entry_uuid: str, fields: CompendiumEntry) -> bool:
         """Merge *fields* into the entry identified by *entry_uuid*.
 
         The ``uuid`` field is protected and cannot be changed via this method.
@@ -795,7 +845,7 @@ class CompendiumManager:
     # callers in other modules are updated to use UUID-based APIs.
     # ------------------------------------------------------------------
 
-    def get_category(self, category_name: str) -> list[dict[str, str]]:
+    def get_category(self, category_name: str) -> list[CompendiumEntry]:
         """[Legacy] Return entries for the first category whose name matches *category_name*.
 
         Prefer ``list_entries(category_uuid)`` for new code.
@@ -806,23 +856,23 @@ class CompendiumManager:
                 return cat.get("entries", [])
         return []
 
-    def list_pov_characters(self) -> list[dict[str, str]]:
+    def list_pov_characters(self) -> list[PovCharacter]:
         """Return a list of POV character summaries from the 'Characters' category.
 
         Returns:
-            list of ``{"uuid": str, "name": str}`` dicts in canonical compendium order.
+            list of ``PovCharacter`` dicts in canonical compendium order.
             Empty list if the 'Characters' category does not exist or has no entries.
         """
         data = self._load_data()
         for cat in data.get("categories", []):
             if cat.get("name", "").lower() == "characters":
                 return [
-                    {"uuid": e.get("uuid", ""), "name": e.get("name", "")}
+                    PovCharacter(uuid=e.get("uuid", ""), name=e.get("name", ""))
                     for e in cat.get("entries", [])
                 ]
         return []
 
-    def add_pov_character(self, name: str, description: str = "") -> dict[str, Any]:
+    def add_pov_character(self, name: str, description: str = "") -> CompendiumEntry:
         """Upsert a POV character into the 'Characters' category.
 
         If a 'Characters' category does not exist it is created. If an entry with
@@ -835,7 +885,7 @@ class CompendiumManager:
         data = self._load_data()
 
         # Find or create the Characters category.
-        characters_cat: dict[str, Any] | None = None
+        characters_cat: CompendiumCategory | None = None
         for cat in data.get("categories", []):
             if cat.get("name", "").lower() == "characters":
                 characters_cat = cat

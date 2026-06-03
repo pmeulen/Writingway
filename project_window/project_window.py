@@ -40,7 +40,6 @@ from settings.theme_manager import ThemeManager
 from util.ia_window import IAWindow
 from util.text_analysis_gui import TextAnalysisApp
 from util.tts_manager import WW_TTSManager
-from util.web_llm import MainWindow
 from util.whisper_app import WhisperApp
 from workshop.workshop_controller import WorkshopController
 
@@ -803,6 +802,9 @@ class ProjectWindow(QMainWindow):
         self.analysis_editor_window.show()
 
     def open_web_llm(self):
+        # Delay QtWebEngine import until this tool is explicitly opened.
+        from util.web_llm import MainWindow
+
         self.web_llm = MainWindow()
         self.web_llm.show()
 
