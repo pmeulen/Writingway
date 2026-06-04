@@ -1,27 +1,42 @@
+# ruff: noqa: RUF001
 import os
-import glob
 import platform
 import textwrap
-import pymupdf
-from typing import Optional, Dict, List, Tuple
 from dataclasses import dataclass
+from gettext import gettext as _
 
-from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QComboBox, QCheckBox, QFileDialog, QMessageBox, QTextEdit,
-    QTabWidget, QWidget, QFormLayout, QGroupBox, QFrame, QSizePolicy
-)
-from PyQt5.QtGui import QPixmap, QFontDatabase
-from PyQt5.QtCore import Qt, pyqtSignal, QSize
-from settings.settings_manager import WWSettingsManager
-from settings.theme_manager import ThemeManager
-from exporter.export_settings_manager import ExportSettingsManager
-from exporter.heading_style_editor import HeadingStyleEditor
-from exporter.heading_formatter import HeadingFormatter, HeadingFormat
-from project_window.tree_manager import load_structure
-from markdownify import MarkdownConverter
+import pymupdf
 from bs4 import BeautifulSoup
 from bs4.element import NavigableString
+from markdownify import MarkdownConverter
+from PyQt5.QtCore import QSize, Qt, pyqtSignal
+from PyQt5.QtGui import QFontDatabase, QPixmap
+from PyQt5.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QFormLayout,
+    QFrame,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+    QTabWidget,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
+
+from exporter.export_settings_manager import ExportSettingsManager
+from exporter.heading_formatter import HeadingFormat, HeadingFormatter
+from exporter.heading_style_editor import HeadingStyleEditor
+from project_window.tree_manager import load_structure
+from settings.settings_manager import WWSettingsManager
+from settings.theme_manager import ThemeManager
 
 
 class ExportDialog(QDialog):
@@ -30,7 +45,7 @@ class ExportDialog(QDialog):
     """
     exportCompleted = pyqtSignal(str)
 
-    def __init__(self, parent=None, project_name: str = "", project_model=None, cover_path: Optional[str] = None):
+    def __init__(self, parent=None, project_name: str = "", project_model=None, cover_path: str | None = None):
         super().__init__(parent)
         self.project_name = project_name or "Untitled"
         self.project_model = project_model
@@ -187,7 +202,7 @@ class ExportDialog(QDialog):
         self.scene_editor.previewUpdated.connect(self.update_heading_preview)
         self._build_level_tab(self.use_scenes_cb, self.scene_editor, _("Scenes"))
 
-    
+
     def _build_level_tab(self, checkbox: QCheckBox, editor: HeadingStyleEditor, tab_name: str):
         container = QWidget()
         vlay = QVBoxLayout(container)
@@ -195,7 +210,7 @@ class ExportDialog(QDialog):
         vlay.addWidget(checkbox)
         vlay.addWidget(editor)
         self.level_tabs.addTab(container, tab_name)
-    
+
     def setup_story_tab(self):
         """Tab for paragraph styling and export range."""
         tab = QWidget()
@@ -265,7 +280,7 @@ class ExportDialog(QDialog):
 
         layout.addWidget(range_group)
         layout.addStretch()
-        
+
         # Populate Range Combos
         act_names = [a.get("name", _("Untitled Act")) for a in self.acts]
         self.start_act_combo.addItems(act_names)
@@ -302,7 +317,7 @@ class ExportDialog(QDialog):
         self.chapter_editor.setEnabled(self.use_chapters_cb.isChecked())
         self.scene_editor.setEnabled(self.use_scenes_cb.isChecked())
         self.update_heading_preview()
-        
+
     def setup_advanced_tab(self):
         tab = QWidget()
         layout = QVBoxLayout(tab)
@@ -316,7 +331,7 @@ class ExportDialog(QDialog):
         self.include_prompts_cb = QCheckBox(_("Include Action Beats (AI Prompts)"))
         self.include_summaries_cb = QCheckBox(_("Include Summaries"))
         self.clean_quotes_cb = QCheckBox(_('Convert curly quotes (“”, ‘’) to straight quotes (", \')'))
-        
+
         checkbox_layout.addWidget(self.include_prompts_cb)
         checkbox_layout.addWidget(self.include_summaries_cb)
         checkbox_layout.addWidget(self.clean_quotes_cb)
@@ -325,7 +340,7 @@ class ExportDialog(QDialog):
         layout.addStretch()
         layout.addWidget(QLabel(_("Additional metadata and options will be added here.")))
         self.tabs.addTab(tab, _("Advanced"))
-        
+
     def update_heading_preview(self):
         use_acts = self.use_acts_cb.isChecked()
         use_chapters = self.use_chapters_cb.isChecked()
@@ -336,35 +351,35 @@ class ExportDialog(QDialog):
         body_style = f"font-family: '{body_font}'; font-size: {body_size}pt; color: #333;"
 
         preview_html = '<div style="text-align:left; padding:12px; border-radius:6px; font-family: Georgia;">'
-        
+
         if use_acts:
             act_sample = self.act_editor.get_formatted_sample(1, "Act One")
             preview_html += f'<div style="margin:25px 0 12px 0;">{act_sample}</div>'
-            
+
         if use_chapters:
             ch1 = self.chapter_editor.get_formatted_sample(1, "Chapter One")
             preview_html += f'<div style="margin:20px 0 8px 0;">{ch1}</div>'
-        
+
         if use_scenes:
             sc1 = self.scene_editor.get_formatted_sample(1, "Introduction")
             preview_html += f'<div style="margin:15px 0 6px 0;">{sc1}</div>'
-                        
+
         preview_html += f'<p style="{body_style}">Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</p>'
-        
+
         # Sample Chapter 2
         if use_chapters:
             ch2 = self.chapter_editor.get_formatted_sample(2, "Chapter Two")
             preview_html += f'<div style="margin:20px 0 8px 0;">{ch2}</div>'
-        
+
         if use_scenes:
             sc2 = self.scene_editor.get_formatted_sample(1, "Opening Scene")
             preview_html += f'<div style="margin:15px 0 6px 0;">{sc2}</div>'
 
         preview_html += f'<p style="{body_style}">Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</p>'
         preview_html += '</div>'
-        
+
         self.heading_preview.setHtml(preview_html)
-    
+
     def apply_theme(self):
         theme = WWSettingsManager.get_appearance_settings().get("theme", "Notion Light")
         self.setStyleSheet(ThemeManager.get_stylesheet(theme))
@@ -375,7 +390,7 @@ class ExportDialog(QDialog):
             label_size = self.cover_label.size()
             if label_size.width() < 50 or label_size.height() < 50:
                 label_size = QSize(240, 340)  # fallback
-            
+
             scaled = pixmap.scaled(label_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             self.cover_label.setPixmap(scaled)
         else:
@@ -387,7 +402,7 @@ class ExportDialog(QDialog):
         super().resizeEvent(event)
         if hasattr(self, 'cover_label') and self.current_cover_path:
             self.update_cover_display()
-            
+
     def change_cover(self):
         file_path, _unused = QFileDialog.getOpenFileName(
             self, _("Select Book Cover"), "", _("Images (*.png *.jpg *.jpeg *.bmp)")
@@ -434,7 +449,7 @@ class ExportDialog(QDialog):
         )
         msg.setStandardButtons(QMessageBox.Ok)
         msg.exec_()
-        
+
     def load_settings(self):
         data = self.settings_manager.load_settings()
         settings = data["settings"]
@@ -451,7 +466,7 @@ class ExportDialog(QDialog):
         self.body_font_combo.setCurrentText(settings.get("body_font_family", "Papyrus"))
         self.body_size_combo.setCurrentText(settings.get("body_font_size", "12"))
 
-        
+
         # Load rich heading formats
         for level, editor in [("act", self.act_editor), ("chapter", self.chapter_editor), ("scene", self.scene_editor)]:
             fmt_data = settings.get(f"{level}_heading_format", {})
@@ -464,7 +479,7 @@ class ExportDialog(QDialog):
                     settings.get(f"{level}_numbering_index", 0),
                     settings.get(f"{level}_template_index", 0)
                 )
-        
+
         last_path = settings.get("last_output_path")
         if last_path and os.path.exists(os.path.dirname(last_path)):
             self.output_path_edit.setText(last_path)
@@ -472,7 +487,7 @@ class ExportDialog(QDialog):
             docs = self.get_default_documents_path()
             default_path = os.path.join(docs, f"{self.project_name}.epub")
             self.output_path_edit.setText(default_path)
-        
+
         s_act = settings.get("start_act_idx", 0)
         s_ch = settings.get("start_ch_idx", 0)
         e_act = settings.get("end_act_idx", len(self.acts)-1 if self.acts else 0)
@@ -482,7 +497,7 @@ class ExportDialog(QDialog):
             self.start_act_combo.setCurrentIndex(s_act)
             if 0 <= s_ch < self.start_ch_combo.count():
                 self.start_ch_combo.setCurrentIndex(s_ch)
-        
+
         if 0 <= e_act < self.end_act_combo.count():
             self.end_act_combo.setCurrentIndex(e_act)
             # Re-update list before setting chapter
@@ -512,12 +527,12 @@ class ExportDialog(QDialog):
             "end_ch_idx": self.end_ch_combo.currentIndex(),
             "last_output_path": self.output_path_edit.text().strip()
         }
-        
+
         # Save rich formats
         for level, editor in [("act", self.act_editor), ("chapter", self.chapter_editor), ("scene", self.scene_editor)]:
             fmt = editor.get_heading_format()
             settings[f"{level}_heading_format"] = fmt.to_dict()
-            
+
         self.settings_manager.save_settings(settings)
 
     def perform_export(self):
@@ -530,7 +545,7 @@ class ExportDialog(QDialog):
         if os.path.exists(output_path):
             file_name = os.path.basename(output_path)
             reply = QMessageBox.question(
-                self, 
+                self,
                 _("Overwrite File?"),
                 _("The file '{}' already exists. Do you want to replace it?").format(file_name),
                 QMessageBox.Yes | QMessageBox.No,
@@ -576,12 +591,12 @@ class ExportDialog(QDialog):
             book.set_title(title)
             book.set_language("en")
             book.add_author(author)
-            
+
             if self.current_cover_path and os.path.exists(self.current_cover_path):
                 with open(self.current_cover_path, "rb") as f:
                     data = f.read()
                 book.set_cover("cover.jpg", data)
-            
+
             full_text = self._get_full_project_text("epub")
             # full_text = full_text.replace('\n', '<br>')
             # Simple single chapter for now; can be expanded to per-chapter
@@ -602,7 +617,7 @@ class ExportDialog(QDialog):
             </html>
             """
             book.add_item(c1)
-            
+
             book.toc = (epub.Link("content.xhtml", "Main Content", "content"),)
             book.spine = ['nav', c1]
             book.add_item(epub.EpubNcx())
@@ -614,7 +629,7 @@ class ExportDialog(QDialog):
     def export_to_html(self, path: str, title: str, author: str):
         """Full HTML export."""
         full_text = self._get_full_project_text("html")
-        
+
         html_content = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -632,14 +647,14 @@ class ExportDialog(QDialog):
     {full_text}
 </body>
 </html>"""
-        
+
         with open(path, "w", encoding="utf-8") as f:
             f.write(html_content)
 
     def export_to_markdown(self, path: str, title: str, author: str):
         """Full Markdown export."""
         full_text = self._get_full_project_text("markdown")
-        
+
         md_content = f"""# {title}
 
 By {author}
@@ -674,7 +689,7 @@ By {author}
 
         doc.save(path)
         doc.close()
-    
+
     def export_to_text(self, path: str, title: str, author: str):
         full_text = self._get_full_project_text(format_type="text")
         text = f"""{title}
@@ -684,12 +699,12 @@ by {author}
 """
         with open(path, "w", encoding="utf-8") as f:
             f.write(text)
-    
+
     def _normalize_typography(self, text: str) -> str:
         """Normalize quotes and other problematic characters for PDF."""
         if not text:
             return ""
-        
+
         replacements = {
             '“': '"',   # left double
             '”': '"',   # right double
@@ -701,13 +716,13 @@ by {author}
             '\u2028': ' ',  # line separator
             '\u2029': ' ',  # paragraph separator
         }
-        
+
         for old, new in replacements.items():
             text = text.replace(old, new)
-        
+
         # Remove any remaining non-ASCII that might cause issues
         text = ''.join(c if ord(c) < 128 else ' ' for c in text)
-        
+
         return text
 
     def _build_hierarchy(self, act_name: str, chapter_name: str|None = None, scene_name: str|None = None) -> list:
@@ -723,19 +738,19 @@ by {author}
         """Generalized heading formatter."""
         title = item.get("name", "Untitled")
         result = template.replace("{title}", title)
-        
+
         result = result.replace("{roman}", self._to_roman(number))
         kanji_map = ["一", "二", "三", "四", "五", "六"]
         kanji = kanji_map[min(number-1, len(kanji_map)-1)]
 
-        
+
         if heading_fmt.get_numbering_index() == 1:  # Roman
             result = result.replace("{num}", self._to_roman(number))
         elif heading_fmt.get_numbering_index() == 2:  # Kanji
             result = result.replace("{num}", kanji)
         else:
             result = result.replace("{num}", str(number))
-        
+
         return result
 
     def _to_roman(self, num: int) -> str:
@@ -745,7 +760,7 @@ by {author}
         roman = ''
         i = 0
         while num > 0:
-            for _ in range(num // val[i]):
+            for _unused in range(num // val[i]):
                 roman += syb[i]
                 num -= val[i]
             i += 1
@@ -760,7 +775,7 @@ by {author}
         use_acts = self.use_acts_cb.isChecked()
         use_chapters = self.use_chapters_cb.isChecked()
         use_scenes = self.use_scenes_cb.isChecked()
-        
+
         start_a = self.start_act_combo.currentIndex() + 1
         start_c = self.start_ch_combo.currentIndex() + 1
         end_a = self.end_act_combo.currentIndex() + 1
@@ -786,7 +801,7 @@ by {author}
                     act, act_idx, self.act_editor, format_type
                 )
                 content_parts.append(heading)
-            
+
             if include_summaries:
                 hierarchy = [act.get("name")]
                 summary = self.project_model.load_summary(hierarchy=hierarchy)
@@ -799,7 +814,7 @@ by {author}
                 if act_idx == end_a and ch_idx > end_c: continue
 
                 ch_name = chapter.get("name", "Untitled Chapter")
-                
+
                 if use_chapters:
                     heading = self._apply_heading_format(
                         chapter, ch_idx, self.chapter_editor, format_type
@@ -818,7 +833,7 @@ by {author}
                             scene, sc_idx, self.scene_editor, format_type
                         )
                         content_parts.append(heading)
-                    
+
                     hierarchy = [act.get("name"), chapter.get("name"), scene.get("name")]
                     html_content = self.project_model.load_scene_content(hierarchy) or scene.get("content", "")
                     if not self.include_prompts_cb.isChecked():
@@ -835,16 +850,16 @@ by {author}
 
                     if self.clean_quotes_cb.isChecked():
                         scene_text = self._normalize_typography(scene_text)
-                    
+
                     content_parts.append(scene_text)
-                    
+
         return "\n\n".join(content_parts)
-            
+
     def _apply_heading_format(self, item: dict, number: int, editor, format_type: str) -> str:
         """Apply full rich formatting + correct heading tag."""
         fmt = editor.get_heading_format()
         title = item.get("name", "Untitled")
-        
+
         heading_text = HeadingFormatter.format_heading(
             fmt.template or f"{editor.level} {{num}}: {{title}}",
             title,
@@ -884,7 +899,7 @@ by {author}
             return f"<{tag}>{heading_text}</{tag}>"
 
         return heading_text
-    
+
     def _get_level_name(self, fmt: HeadingFormat) -> str:
         # heuristic
         if "Act" in fmt.template:
@@ -915,12 +930,12 @@ by {author}
         if fmt.color:
             styles.append(f"color: {fmt.color}")
         return "; ".join(styles)
-    
+
     def _html_to_fragment(self, html_content: str, base_font: str, base_size: str) -> str:
         """Extract only the body content from Qt-generated rich HTML, removing full document wrapper."""
         if not html_content or not html_content.strip().startswith('<'):
             return html_content or ""
-        
+
         soup = BeautifulSoup(html_content, "html.parser")
 
         # Extract content from <body> if present
@@ -929,12 +944,12 @@ by {author}
             # Remove Qt meta/style tags
             for tag in body.find_all(['style', 'meta']):
                 tag.decompose()
-            
+
             content = body
         else:
             content = soup
 
-        
+
         default_families = ["arial", "helvetica neue", "verdana"]
         default_size = "12pt"
         p_style = f"font-family: '{base_font}'; font-size: {base_size}pt; line-height: 1.5;"
@@ -944,7 +959,7 @@ by {author}
         for tag in content.find_all(True):
             if tag.name == 'p':
                 style = tag.get('style', '')
-            
+
                 # Remove Qt empty paragraph spacers
                 if '-qt-paragraph-type:empty' in style:
                     tag.decompose()          # Completely remove these empty spacers
@@ -966,17 +981,17 @@ by {author}
                         styles[k.strip().lower()] = v.strip().lower()
 
                 new_styles = []
-                
-                # Check Font Family: 
+
+                # Check Font Family:
                 # Keep it ONLY if it's NOT one of the common defaults (meaning a user override)
                 family_val = styles.get('font-family', '')
                 if family_val:
                     # 1. Split by comma, 2. Strip quotes and whitespace from each item
                     fonts = [f.strip().strip("'").strip('"').lower() for f in family_val.split(',')]
-                    
+
                     # 3. Check the primary (first) font in the list
                     primary_font = fonts[0] if fonts else ""
-                    
+
                     # If the primary font is NOT a standard default, it's a user choice (like 'arial black')
                     if primary_font and primary_font not in default_families:
                         orig_family = styles['font-family']
@@ -1011,29 +1026,29 @@ by {author}
         """Remove Qt-specific verbose styles, keep only meaningful ones."""
         if not style_str:
             return ""
-        
+
         parts = [part.strip() for part in style_str.split(';') if part.strip()]
         clean_parts = []
-        
+
         for part in parts:
             # Skip all Qt-specific and default margin properties
             if any(qt in part for qt in [
-                '-qt-', 
-                'margin-top:0px', 
-                'margin-bottom:0px', 
-                'margin-left:0px', 
-                'margin-right:0px', 
-                '-qt-block-indent:0', 
+                '-qt-',
+                'margin-top:0px',
+                'margin-bottom:0px',
+                'margin-left:0px',
+                'margin-right:0px',
+                '-qt-block-indent:0',
                 'text-indent:0px'
             ]):
                 continue
-            
+
             # Keep useful styles
             if any(key in part for key in ['font-family', 'font-size', 'color', 'text-align', 'line-height']):
                 clean_parts.append(part)
-        
+
         return '; '.join(clean_parts) if clean_parts else ""
-        
+
     def _remove_ai_prompts(self, html_content: str) -> str:
         """Removes markers and all content between them using a flat index approach."""
         if not html_content or "__________" not in html_content:
@@ -1043,18 +1058,18 @@ by {author}
 
         # 1. Get a flat list of all paragraph tags in the document
         all_ps = soup.find_all('p')
-        
+
         # 2. Identify the indices of paragraphs that contain the separator text
         marker_indices = [i for i, p in enumerate(all_ps) if "__________" in p.get_text()]
 
         # 3. Process markers in pairs, working backwards through the list
-        # We work backwards so that deleting elements doesn't mess up the indices of 
+        # We work backwards so that deleting elements doesn't mess up the indices of
         # the markers we haven't processed yet.
         # len(marker_indices) // 2 * 2 ensures we only iterate over complete pairs
         for j in range(len(marker_indices) // 2 * 2 - 2, -1, -2):
             start_idx = marker_indices[j]
             end_idx = marker_indices[j+1]
-            
+
             # Remove every paragraph from the start marker to the end marker (inclusive)
             # Working backwards here too (end_idx down to start_idx)
             for k in range(end_idx, start_idx - 1, -1):
@@ -1067,11 +1082,11 @@ by {author}
             p.decompose()
 
         return str(soup)
-        
+
     def _fallback_content_extraction(self, format_type: str) -> str:
         """Fallback when ProjectModel is not available - with proper numbering."""
         content_parts = []
-        
+
         use_acts = self.use_acts_cb.isChecked()
         use_chapters = self.use_chapters_cb.isChecked()
         use_scenes = self.use_scenes_cb.isChecked()
@@ -1082,9 +1097,9 @@ by {author}
                     act, act_idx, self.act_editor, format_type
                 )
                 content_parts.append(heading)
-            
+
             # Need Act summaries here and for chapters below
-            
+
             for ch_idx, chapter in enumerate(act.get("chapters", []), 1):
                 if use_chapters:
                     heading = self._apply_heading_format(
@@ -1103,7 +1118,7 @@ by {author}
                     content_parts.append(content)
 
         return "\n\n".join(content_parts)
-    
+
     def _html_to_plain_text(self, html_content: str) -> str:
         """Convert HTML scene content to clean plain text."""
         if not html_content:
@@ -1112,7 +1127,7 @@ by {author}
         # Remove script/style tags
         for tag in soup(["script", "style"]):
             tag.decompose()
-            
+
         # Convert semantic tags to paragraph breaks
         for tag in soup.find_all(['p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'blockquote']):
             if tag.get_text(strip=True):
@@ -1147,7 +1162,7 @@ by {author}
 
         if current_para:
             paragraphs.append(" ".join(current_para))
-            
+
         if not paragraphs:
             text = soup.get_text(separator="\n\n", strip=True)
             paragraphs = [line.strip() for line in text.split('\n') if line.strip()]
@@ -1157,24 +1172,24 @@ by {author}
         """Wrap text at word boundaries with 75 char width and blank lines between paragraphs."""
         if not text:
             return ""
-        
+
         paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
         wrapped_paragraphs = []
-        
+
         for para in paragraphs:
             # Wrap each paragraph
             wrapped = textwrap.fill(para, width=width, break_long_words=False, replace_whitespace=True, drop_whitespace=True)
             #wrapped = textwrap.fill(para, width=width, break_long_words=False, replace_whitespace=False)
             wrapped_paragraphs.append(wrapped)
-        
+
         # Join paragraphs with blank line between them
         return "\n\n".join(wrapped_paragraphs)
-    
+
     def _html_to_markdown(self, html_content: str) -> str:
         """Simple HTML to Markdown conversion."""
         if not html_content:
             return ""
-        
+
         # Convert HTML to Markdown
         markdown_text = MDConverter(
             heading_style="ATX",           # Use # ## ### style (better for export)
@@ -1182,7 +1197,7 @@ by {author}
             escape_asterisks=False,
             escape_underscores=False
         ).convert(html_content)
-        
+
         # Clean up excessive whitespace
         lines = [line.rstrip() for line in markdown_text.splitlines()]
         # Remove multiple blank lines
@@ -1190,7 +1205,7 @@ by {author}
         for line in lines:
             if line.strip() or (cleaned and cleaned[-1].strip()):
                 cleaned.append(line)
-        
+
         return '\n'.join(cleaned).strip()
 
 # PDF specific functions
@@ -1202,23 +1217,23 @@ class TextStyle:
     font_size: float
     bold: bool = False
     italic: bool = False
-    color: Tuple[float, float, float] = (0, 0, 0)
+    color: tuple[float, float, float] = (0, 0, 0)
 
 class FontManager:
     """Resolves and caches PyMuPDF Font objects."""
     def __init__(self):
-        self._cache: Dict[str, pymupdf.Font] = {}
-        self._font_refs: Dict[str, str] = {} # Map file path to f0, f1...
-        self._faux_italic_flags: Dict[str, bool] = {}
-        self._system_fonts_cache: List[str] = []  # Cache of all full paths to font files
+        self._cache: dict[str, pymupdf.Font] = {}
+        self._font_refs: dict[str, str] = {} # Map file path to f0, f1...
+        self._faux_italic_flags: dict[str, bool] = {}
+        self._system_fonts_cache: list[str] = []  # Cache of all full paths to font files
 
-    def get_font(self, family: str, bold: bool = False, italic: bool = False) -> Tuple[pymupdf.Font, str, bool]:
+    def get_font(self, family: str, bold: bool = False, italic: bool = False) -> tuple[pymupdf.Font, str, bool]:
         """Returns a Font object and a unique reference name for it."""
         key = f"{family.lower()}_{'b' if bold else ''}{'i' if italic else ''}"
         if key in self._cache:
             return (
-                self._cache[key], 
-                self._font_refs[key], 
+                self._cache[key],
+                self._font_refs[key],
                 self._faux_italic_flags.get(key, False)
             )
 
@@ -1243,16 +1258,16 @@ class FontManager:
         self._font_refs[key] = ref
         self._faux_italic_flags[key] = is_faux_italic
         return font, ref, is_faux_italic
-    
+
     def _get_base14_fallback(self, bold: bool, italic: bool) -> pymupdf.Font:
         """Returns the official Adobe Base-14 equivalent for Helvetica."""
-        if bold and italic: 
+        if bold and italic:
             return pymupdf.Font("Helvetica-BoldOblique")
-        if bold: 
+        if bold:
             return pymupdf.Font("Helvetica-Bold")
-        if italic: 
+        if italic:
             return pymupdf.Font("Helvetica-Oblique")
-        
+
         return pymupdf.Font("Helvetica")
 
     def _ensure_font_cache(self):
@@ -1275,7 +1290,7 @@ class FontManager:
             search_paths = ["/usr/share/fonts", "/usr/local/share/fonts"]
 
         valid_exts = ('.ttf', '.otf', '.ttc', '.otc')
-        
+
         for base in search_paths:
             if not os.path.exists(base):
                 continue
@@ -1285,21 +1300,21 @@ class FontManager:
                     if f.lower().endswith(valid_exts):
                         self._system_fonts_cache.append(os.path.join(root, f))
 
-    def _resolve_path(self, family: str, bold: bool, italic: bool) -> Optional[str]:
+    def _resolve_path(self, family: str, bold: bool, italic: bool) -> str | None:
         """Discovery logic optimized for macOS Supplemental fonts and case-insensitivity."""
         self._ensure_font_cache()
 
         family_tokens = family.lower().split()
-    
+
         # 2. Search our cached list of full paths
         # We look for a path where the FILENAME contains all necessary tokens
         for path in self._system_fonts_cache:
             filename = os.path.basename(path).lower()
-            
+
             # Check if all family words (e.g. "arial", "black") are in the filename
             if not all(token in filename for token in family_tokens):
                 continue
-            
+
             remainder = filename
             for t in family_tokens:
                 remainder = remainder.replace(t, "", 1)
@@ -1315,7 +1330,7 @@ class FontManager:
                 return path
 
         return None
-    
+
 class RichTextRenderer:
     """Handles HTML parsing and drawing text with word-wrapping."""
     def __init__(self, doc: pymupdf.Document, font_manager: FontManager):
@@ -1336,10 +1351,10 @@ class RichTextRenderer:
     def render_html_block(self, html: str, default_font: str, default_size: float):
         """Parses HTML into styled runs and draws them with wrapping."""
         if not self.current_page: self._new_page()
-        
+
         soup = BeautifulSoup(html, "html.parser")
         initial_style = TextStyle(default_font, default_size)
-        
+
         self._process_node(soup, initial_style)
 
     def _process_node(self, node, current_style: TextStyle):
@@ -1375,11 +1390,11 @@ class RichTextRenderer:
 
         raw_style = node.get('style', '')
         norm_style = raw_style.lower().replace(" ", "")
-        
+
         # Check tags and inline CSS
         is_bold = base.bold or node.name in ['b', 'strong', 'h1', 'h2', 'h3'] or "font-weight:bold" in norm_style
         is_italic = base.italic or node.name in ['i', 'em'] or "font-style:italic" in norm_style
-        
+
         # Check font family override
         family = base.font_family
         lower_raw = raw_style.lower()
@@ -1388,21 +1403,21 @@ class RichTextRenderer:
                 # Find the position in the raw string using the lowercase locator
                 start_marker = "font-family:"
                 start_idx = lower_raw.find(start_marker) + len(start_marker)
-                
+
                 # Find the end of the declaration (either ; or end of string)
                 end_idx = raw_style.find(";", start_idx)
                 if end_idx == -1:
                     end_idx = len(raw_style)
-                
+
                 # Extract the actual value from the RAW string
                 family_val = raw_style[start_idx:end_idx]
-                
+
                 # Handle font stacks (comma separated) and strip quotes/spaces
                 # This preserves "Academy Engraved LET" exactly as it is
                 family = family_val.split(",")[0].strip("'\" ")
             except Exception:
                 pass
-            
+
         # Check font size override
         size = base.font_size
         if node.name == 'h1': size = base.font_size * 2.0
@@ -1422,26 +1437,26 @@ class RichTextRenderer:
         line_height = font_size * 1.4 # Standard typography leading
         self.x = self.margin
         self.y += line_height + extra_spacing
-        
+
         # Check for page break after moving Y
         if self.y > self.page_height - self.margin:
             self._new_page()
 
     def _draw_text(self, text: str, style: TextStyle):
         if not text: return
-        
+
         # Normalize newlines to spaces, but do NOT fully strip yet.
         # Stripping too early removes the space between "word <i>italic</i>"
         display_text = text.replace('\n', ' ')
-        
+
         # If we are at the start of a line (x == margin), strip leading whitespace
         if self.x == self.margin:
             display_text = display_text.lstrip()
-        
+
         if not display_text: return
 
         font_obj, font_ref, is_faux = self.fm.get_font(style.font_family, style.bold, style.italic)
-        
+
         # Ensure font is on current page
         self.current_page.insert_font(fontname=font_ref, fontbuffer=font_obj.buffer)
 
@@ -1454,14 +1469,14 @@ class RichTextRenderer:
             word_to_draw = word + (" " if has_trailing_space else "")
             if not word_to_draw: continue
             w_len = font_obj.text_length(word_to_draw, fontsize=style.font_size)
-                
+
             # Internal wrap (if word exceeds line width)
             if self.x + w_len > self.page_width - self.margin:
                 # Use our new force_newline to move down correctly
                 self._force_newline(style.font_size)
                 # Re-register font for potential new page
                 self.current_page.insert_font(fontname=font_ref, fontbuffer=font_obj.buffer)
-                
+
                 # Since we just wrapped, re-calculate without the leading space
                 word_to_draw = word_to_draw.lstrip()
                 w_len = font_obj.text_length(word_to_draw, fontsize=style.font_size)
@@ -1469,7 +1484,7 @@ class RichTextRenderer:
             # --- FAUX ITALIC LOGIC ---
             insert_pos = pymupdf.Point(self.x, self.y + style.font_size)
             morph_data = None
-            
+
             if is_faux:
                 # Apply a skew matrix: Matrix(a, b, c, d, e, f)
                 # c = 0.3 creates a ~15 degree slant
@@ -1479,8 +1494,8 @@ class RichTextRenderer:
             # PyMuPDF insert_text uses the baseline. We adjust y so it doesn't collide with top.
             self.current_page.insert_text(
                 insert_pos,
-                word_to_draw, 
-                fontsize=style.font_size, 
+                word_to_draw,
+                fontsize=style.font_size,
                 fontname=font_ref,
                 morph=morph_data # This applies the skew
             )
@@ -1491,12 +1506,12 @@ class MDConverter(MarkdownConverter):
     def convert_span(self, el, text, convert_as_inline=True, **kwargs):
         # Check for italic or bold in the span's style attribute
         style = el.get("style", "").lower()
-        
+
         if "font-style:italic" in style:
             return f"*{text}*"
         elif "font-weight:bold" in style:
             return f"**{text}**"
-            
+
         # Fallback for unstyled or differently styled spans
         return text
 

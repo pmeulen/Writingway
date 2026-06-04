@@ -1,5 +1,4 @@
 # exporter/heading_formatter.py
-from typing import Dict, Optional
 
 
 class HeadingFormatter:
@@ -75,13 +74,13 @@ class HeadingFormat:
         self.bold: bool = False
         self.italic: bool = False
         self.underline: bool = False
-        self.color: Optional[str] = None
+        self.color: str | None = None
         self.font_family: str = "Georgia"
         self.font_size: int = 14
         self.template: str = ""
         self.numbering_index = 0 # 0=arabic, 1=roman, 2=kanji
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             "bold": self.bold,
             "italic": self.italic,
@@ -100,6 +99,6 @@ class HeadingFormat:
             if hasattr(fmt, k):
                 setattr(fmt, k, v)
         return fmt
-    
+
     def get_numbering_index(self) -> int:
         return self.numbering_index

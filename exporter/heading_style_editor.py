@@ -1,13 +1,24 @@
-from typing import Optional, List, Dict
+from gettext import gettext as _
+
+from PyQt5.QtCore import QSize, pyqtSignal
+from PyQt5.QtGui import QColor, QFont, QTextCharFormat, QTextCursor
 from PyQt5.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QTextEdit,
-    QWidget, QGroupBox, QToolBar, QAction, QFontComboBox
+    QAction,
+    QComboBox,
+    QFontComboBox,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QTextEdit,
+    QToolBar,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt5.QtGui import QTextCursor, QTextCharFormat, QFont, QColor
-from PyQt5.QtCore import pyqtSignal, QSize
+
+from exporter.heading_formatter import HeadingFormat, HeadingFormatter
 from settings.settings_manager import WWSettingsManager
 from settings.theme_manager import ThemeManager
-from exporter.heading_formatter import HeadingFormatter, HeadingFormat
+
 
 class HeadingStyleEditor(QWidget):
     """
@@ -48,7 +59,7 @@ class HeadingStyleEditor(QWidget):
 
         # Numbering and Template
         controls_layout = QHBoxLayout()
-        
+
         # Numbering Style
         numbering_label = QLabel(_("Numbering Style:"))
         self.numbering_combo = QComboBox()
@@ -152,13 +163,13 @@ class HeadingStyleEditor(QWidget):
 
     # ==================== FORMATTING METHODS ====================
 
-    def toggle_bold(self): 
+    def toggle_bold(self):
         self._toggle_format("bold")
 
-    def toggle_italic(self): 
+    def toggle_italic(self):
         self._toggle_format("italic")
 
-    def toggle_underline(self): 
+    def toggle_underline(self):
         self._toggle_format("underline")
 
     def _toggle_format(self, fmt_type: str):
@@ -265,14 +276,14 @@ class HeadingStyleEditor(QWidget):
         fmt.font_family = self.font_combo.currentFont().family()
         fmt.font_size = int(self.font_size_combo.currentText())
         fmt.numbering_index = self.get_numbering_index()
-                
+
         # Extract color from current format
         cursor = self.editor.textCursor()
         cursor.select(QTextCursor.LineUnderCursor)
         cf = cursor.charFormat().foreground().color()
         if cf.isValid() and cf.name != "#000000":
             fmt.color = cf.name()
-        
+
         return fmt
 
     def set_rich_format(self, heading_fmt: HeadingFormat):
@@ -283,7 +294,7 @@ class HeadingStyleEditor(QWidget):
         self.numbering_combo.setCurrentIndex(heading_fmt.numbering_index)
         self.font_combo.setCurrentFont(QFont(heading_fmt.font_family))
         self.font_size_combo.setCurrentText(str(heading_fmt.font_size))
-                
+
         if heading_fmt.color:
             # apply color
             cursor = self.editor.textCursor()
@@ -305,7 +316,7 @@ class HeadingStyleEditor(QWidget):
         )
         style = self._build_inline_style(fmt)
         return f'<span style="{style}">{text}</span>'
-    
+
     def _build_inline_style(self, fmt: HeadingFormat) -> str:
         styles = []
         if fmt.font_family:
@@ -321,7 +332,7 @@ class HeadingStyleEditor(QWidget):
         if fmt.color:
             styles.append(f"color: {fmt.color}")
         return "; ".join(styles)
-    
+
     # Getters/Setters
     def get_heading_text(self) -> str:
         return self.editor.toPlainText().strip()
@@ -334,12 +345,12 @@ class HeadingStyleEditor(QWidget):
 
     def set_settings(self, heading_text: str, numbering_index: int, template_index: int):
         self.numbering_combo.setCurrentIndex(numbering_index)
-        
+
         if 0 <= template_index < self.template_combo.count():
             self.template_combo.setCurrentIndex(template_index)
         else:
             self.template_combo.setCurrentText(_("Custom"))
-        
+
         if heading_text:
             self.editor.setPlainText(heading_text)
         else:

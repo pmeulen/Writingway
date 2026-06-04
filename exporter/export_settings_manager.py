@@ -1,6 +1,7 @@
-import os
 import json
-from typing import Dict, Any, Optional
+import os
+from typing import Any
+
 from settings.settings_manager import WWSettingsManager
 
 
@@ -23,7 +24,7 @@ class ExportSettingsManager:
         os.makedirs(project_dir, exist_ok=True)
         return os.path.join(project_dir, self.FILENAME)
 
-    def load_settings(self) -> Dict[str, Any]:
+    def load_settings(self) -> dict[str, Any]:
         """Load settings with backward compatibility."""
         default = self._get_default_settings()
 
@@ -31,7 +32,7 @@ class ExportSettingsManager:
             return default
 
         try:
-            with open(self.file_path, "r", encoding="utf-8") as f:
+            with open(self.file_path, encoding="utf-8") as f:
                 data = json.load(f)
 
             version = data.get("version", 0)
@@ -50,7 +51,7 @@ class ExportSettingsManager:
             print(f"Error loading export settings: {e}")
             return default
 
-    def save_settings(self, settings: Dict[str, Any]):
+    def save_settings(self, settings: dict[str, Any]):
         """Save current settings with version."""
         data = {
             "version": self.CURRENT_VERSION,
@@ -62,7 +63,7 @@ class ExportSettingsManager:
         except Exception as e:
             print(f"Error saving export settings: {e}")
 
-    def _get_default_settings(self) -> Dict[str, Any]:
+    def _get_default_settings(self) -> dict[str, Any]:
         return {
             "version": self.CURRENT_VERSION,
             "settings": {
@@ -80,7 +81,7 @@ class ExportSettingsManager:
             }
         }
 
-    def _migrate_settings(self, data: Dict, old_version: int) -> Dict:
+    def _migrate_settings(self, data: dict, old_version: int) -> dict:
         """Handle future migrations."""
         settings = data.get("settings", {})
         # Example: if old_version == 0: add new keys...
