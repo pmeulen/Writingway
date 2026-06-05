@@ -79,7 +79,7 @@ class HeadingStyleEditor(QWidget):
         self.template_combo.setInsertPolicy(QComboBox.NoInsert)
 
         self._populate_templates()
-        self.template_combo.currentIndexChanged.connect(self._on_template_changed)
+        self.template_combo.activated.connect(self._on_template_changed)
         self.template_combo.lineEdit().setReadOnly(True)
 
         controls_layout.addWidget(template_label, stretch=0)
@@ -234,21 +234,61 @@ class HeadingStyleEditor(QWidget):
         self.previewUpdated.emit()
 
     def _on_editor_changed(self):
+        """Updates the combo box state to match the editor text."""
+        text = self.editor.toPlainText()
+        # Normalize to {num} to find a match in the preset list
+        normalized = text.replace("{roman}", "{num}").replace("{kanji}", "{num}")
+        
+        idx = self.template_combo.findText(normalized)
+        
+        # We don't need blockSignals here if we use .activated for the combo,
+        # but it's still good practice to prevent currentIndexChanged side-effects
+        self.template_combo.blockSignals(True)
+        if idx != -1:
+            self.template_combo.setCurrentIndex(idx)
+        else:
+            self.template_combo.setCurrentText(_("Custom"))
+        self.template_combo.blockSignals(False)
+
         self.previewUpdated.emit()
 
     def _on_numbering_changed(self, index: int):
-        self._update_heading_from_combos()
+        """Swaps placeholders in the editor based on numbering selection without losing user text."""
+        placeholder_map = {0: "{num}", 1: "{roman}", 2: "{kanji}"}
+        target = placeholder_map.get(index, "{num}")
+        
+        text = self.editor.toPlainText()
+        # Replace any existing placeholder with the new one
+        for p in ["{num}", "{roman}", "{kanji}"]:
+            if p in text:
+                text = text.replace(p, target)
+        
+        self.editor.setPlainText(text)
         self.previewUpdated.emit()
 
     def _on_template_changed(self, index: int):
-        self._update_heading_from_combos()
+        """Overwrites the editor with a preset, but respects the current numbering style."""
+        template_text = self.template_combo.currentText()
+        
+        # Don't overwrite if the user selects "Custom" or if it's empty
+        if template_text == _("Custom") or not template_text:
+            return
+
+        # Get current numbering placeholder
+        placeholder_map = {0: "{num}", 1: "{roman}", 2: "{kanji}"}
+        target = placeholder_map.get(self.numbering_combo.currentIndex(), "{num}")
+
+        # Templates in the combo always use {num}, convert it to the active style
+        new_text = template_text.replace("{num}", target)
+        
+        self.editor.setPlainText(new_text)
         self.previewUpdated.emit()
 
     def _update_heading_from_combos(self):
         numbering_idx = self.numbering_combo.currentIndex()
         template_text = self.template_combo.currentText().strip()
 
-        if not template_text or template_text in ["Custom...", "None"]:
+        if not template_text:
             default = {
                 "Act": "Act {num}: {title}",
                 "Chapter": "Chapter {num}: {title}",
@@ -294,6 +334,15 @@ class HeadingStyleEditor(QWidget):
         self.numbering_combo.setCurrentIndex(heading_fmt.numbering_index)
         self.font_combo.setCurrentFont(QFont(heading_fmt.font_family))
         self.font_size_combo.setCurrentText(str(heading_fmt.font_size))
+
+        # In case the user entered {roman} or {kanji}, find the {num} template that matches
+        lookup = heading_fmt.template.replace("{roman}", "{num}").replace("{kanji}", "{num}")
+        idx = self.template_combo.findText(lookup)
+
+        if idx != -1:
+            self.template_combo.setCurrentIndex(idx)
+        else:
+            self.template_combo.setCurrentText(_("Custom"))
 
         if heading_fmt.color:
             # apply color

@@ -56,18 +56,6 @@ class HeadingFormatter:
         kanji_map = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"]
         return kanji_map[min(num-1, len(kanji_map)-1)] if num <= 10 else str(num)
 
-
-    @staticmethod
-    def get_sample_html(heading_fmt, number: int, title: str) -> str:
-        """Convenience for preview (can be extended with rich formatting later)."""
-        text = HeadingFormatter.format_heading(
-            heading_fmt.get_heading_text() if hasattr(heading_fmt, 'get_heading_text') else str(heading_fmt),
-            title,
-            number,
-            heading_fmt.get_numbering_index() if hasattr(heading_fmt, 'get_numbering_index') else 0
-        )
-        return text  # You can wrap with <span style=...> later
-
 class HeadingFormat:
     """Simple data class to hold rich formatting for a heading level."""
     def __init__(self):

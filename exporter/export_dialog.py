@@ -357,7 +357,7 @@ class ExportDialog(QDialog):
             preview_html += f'<div style="margin:25px 0 12px 0;">{act_sample}</div>'
 
         if use_chapters:
-            ch1 = self.chapter_editor.get_formatted_sample(1, "Chapter One")
+            ch1 = self.chapter_editor.get_formatted_sample(1, "Prologue")
             preview_html += f'<div style="margin:20px 0 8px 0;">{ch1}</div>'
 
         if use_scenes:
@@ -368,7 +368,7 @@ class ExportDialog(QDialog):
 
         # Sample Chapter 2
         if use_chapters:
-            ch2 = self.chapter_editor.get_formatted_sample(2, "Chapter Two")
+            ch2 = self.chapter_editor.get_formatted_sample(2, "The Beginning")
             preview_html += f'<div style="margin:20px 0 8px 0;">{ch2}</div>'
 
         if use_scenes:
@@ -576,12 +576,6 @@ class ExportDialog(QDialog):
         except Exception as e:
             QMessageBox.critical(self, _("Export Failed"), str(e))
 
-    # Export methods
-    def get_project_content(self):
-        if self.project_model:
-            return self.project_model.structure
-        return {"acts": []}
-
     def export_to_epub(self, path: str, title: str, author: str):
         try:
             from ebooklib import epub
@@ -725,47 +719,6 @@ by {author}
 
         return text
 
-    def _build_hierarchy(self, act_name: str, chapter_name: str|None = None, scene_name: str|None = None) -> list:
-        """Build hierarchy list for ProjectModel methods."""
-        hierarchy = [act_name]
-        if chapter_name:
-            hierarchy.append(chapter_name)
-        if scene_name:
-            hierarchy.append(scene_name)
-        return hierarchy
-
-    def _get_formatted_heading(self, item: dict, heading_fmt: HeadingFormat, number: int, template: str) -> str:
-        """Generalized heading formatter."""
-        title = item.get("name", "Untitled")
-        result = template.replace("{title}", title)
-
-        result = result.replace("{roman}", self._to_roman(number))
-        kanji_map = ["一", "二", "三", "四", "五", "六"]
-        kanji = kanji_map[min(number-1, len(kanji_map)-1)]
-
-
-        if heading_fmt.get_numbering_index() == 1:  # Roman
-            result = result.replace("{num}", self._to_roman(number))
-        elif heading_fmt.get_numbering_index() == 2:  # Kanji
-            result = result.replace("{num}", kanji)
-        else:
-            result = result.replace("{num}", str(number))
-
-        return result
-
-    def _to_roman(self, num: int) -> str:
-        """Convert integer to Roman numeral."""
-        val = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1]
-        syb = ["M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I"]
-        roman = ''
-        i = 0
-        while num > 0:
-            for _unused in range(num // val[i]):
-                roman += syb[i]
-                num -= val[i]
-            i += 1
-        return roman
-
     def _get_full_project_text(self, format_type: str = "text") -> str:
         """Build complete project text with proper format conversion."""
         if not self.project_model:
@@ -812,8 +765,6 @@ by {author}
                 # Filter chapter range
                 if act_idx == start_a and ch_idx < start_c: continue
                 if act_idx == end_a and ch_idx > end_c: continue
-
-                ch_name = chapter.get("name", "Untitled Chapter")
 
                 if use_chapters:
                     heading = self._apply_heading_format(
@@ -899,21 +850,6 @@ by {author}
             return f"<{tag}>{heading_text}</{tag}>"
 
         return heading_text
-
-    def _get_level_name(self, fmt: HeadingFormat) -> str:
-        # heuristic
-        if "Act" in fmt.template:
-            return "Act"
-        if "Chapter" in fmt.template:
-            return "Chapter"
-        return "Scene"
-
-    def _get_heading_level(self, fmt: HeadingFormat) -> int:
-        if "Act" in fmt.template:
-            return 1
-        if "Chapter" in fmt.template:
-            return 2
-        return 3
 
     def _build_css_style(self, fmt: HeadingFormat) -> str:
         styles = []
@@ -1020,34 +956,6 @@ by {author}
 
         # Return cleaned inner HTML
         return ''.join(str(child) for child in content.children).strip()
-
-    # DELETE_ME
-    def _clean_qt_style(self, style_str: str) -> str:
-        """Remove Qt-specific verbose styles, keep only meaningful ones."""
-        if not style_str:
-            return ""
-
-        parts = [part.strip() for part in style_str.split(';') if part.strip()]
-        clean_parts = []
-
-        for part in parts:
-            # Skip all Qt-specific and default margin properties
-            if any(qt in part for qt in [
-                '-qt-',
-                'margin-top:0px',
-                'margin-bottom:0px',
-                'margin-left:0px',
-                'margin-right:0px',
-                '-qt-block-indent:0',
-                'text-indent:0px'
-            ]):
-                continue
-
-            # Keep useful styles
-            if any(key in part for key in ['font-family', 'font-size', 'color', 'text-align', 'line-height']):
-                clean_parts.append(part)
-
-        return '; '.join(clean_parts) if clean_parts else ""
 
     def _remove_ai_prompts(self, html_content: str) -> str:
         """Removes markers and all content between them using a flat index approach."""
@@ -1514,6 +1422,8 @@ class MDConverter(MarkdownConverter):
 
         # Fallback for unstyled or differently styled spans
         return text
+    # Fool vulture so it thinks overriden functions are used
+    _vulture_hooks = [convert_span]
 
 def show_export_dialog(parent, project_name: str, project_model=None, cover_path=None):
     dialog = ExportDialog(parent, project_name, project_model, cover_path)
