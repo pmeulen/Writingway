@@ -140,7 +140,7 @@ class EnhancedCompendiumWindow(QMainWindow):
         # 4) Create the left (tree), center (content/tabs), and right (tags) panels
         self._setup_tree_view()
         self._setup_center_panel()
-        self.create_right_panel()
+        self._setup_right_panel()
 
         # 5) Set splitter proportions
         self.main_splitter.setStretchFactor(0, 1)  # Tree view
@@ -510,7 +510,7 @@ class EnhancedCompendiumWindow(QMainWindow):
         center_layout.addStretch()
         self.main_splitter.addWidget(self.center_widget)
 
-    def create_right_panel(self) -> None:
+    def _setup_right_panel(self) -> None:
         """Create the right panel for tags management."""
         self.right_widget = QWidget()
         right_layout = QVBoxLayout(self.right_widget)
