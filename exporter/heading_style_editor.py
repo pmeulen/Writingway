@@ -26,13 +26,15 @@ class HeadingStyleEditor(QWidget):
     """
     previewUpdated = pyqtSignal()
 
-    def __init__(self, title, level: str = "Chapter", parent=None):
+    def __init__(self, title, level: str = "Chapter", default_font: str = "Georgia", default_size: int = 14, parent=None):
         """
         level: "Act", "Chapter", or "Scene"
         """
         super().__init__(parent)
         self.level = level
         self.title = title
+        self._default_font_name = default_font
+        self._default_size = str(default_size)
         self.setup_ui()
 
     def setup_ui(self):
@@ -150,13 +152,14 @@ class HeadingStyleEditor(QWidget):
 
         # Font family
         self.font_combo = QFontComboBox()
+        self.font_combo.setCurrentFont(QFont(self._default_font_name))
         self.font_combo.currentFontChanged.connect(self.apply_font_family)
         self.toolbar.addWidget(self.font_combo)
 
         # Font size
         self.font_size_combo = QComboBox()
         self.font_size_combo.addItems([str(s) for s in [10, 12, 14, 16, 18, 20, 24, 28, 32]])
-        self.font_size_combo.setCurrentText("14")
+        self.font_size_combo.setCurrentText(self._default_size)
         self.font_size_combo.setMinimumWidth(70)
         self.font_size_combo.currentIndexChanged.connect(self.apply_font_size)
         self.toolbar.addWidget(self.font_size_combo)

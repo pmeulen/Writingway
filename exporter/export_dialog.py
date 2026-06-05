@@ -180,7 +180,7 @@ class ExportDialog(QDialog):
         self.use_acts_cb.setChecked(True)
         self.use_acts_cb.stateChanged.connect(self.on_use_changed)
 
-        self.act_editor = HeadingStyleEditor(None, "Act")
+        self.act_editor = HeadingStyleEditor(None, "Act", default_font="Georgia", default_size=24)
         self.act_editor.previewUpdated.connect(self.update_heading_preview)
         self._build_level_tab(self.use_acts_cb, self.act_editor, _("Acts"))
 
@@ -189,7 +189,7 @@ class ExportDialog(QDialog):
         self.use_chapters_cb.setChecked(True)
         self.use_chapters_cb.stateChanged.connect(self.on_use_changed)
 
-        self.chapter_editor = HeadingStyleEditor(None, "Chapter")
+        self.chapter_editor = HeadingStyleEditor(None, "Chapter", default_font="Georgia", default_size=18)
         self.chapter_editor.previewUpdated.connect(self.update_heading_preview)
         self._build_level_tab(self.use_chapters_cb, self.chapter_editor, _("Chapters"))
 
@@ -198,7 +198,7 @@ class ExportDialog(QDialog):
         self.use_scenes_cb.setChecked(True)
         self.use_scenes_cb.stateChanged.connect(self.on_use_changed)
 
-        self.scene_editor = HeadingStyleEditor(None, "Scene")
+        self.scene_editor = HeadingStyleEditor(None, "Scene", default_font="Georgia", default_size=14)
         self.scene_editor.previewUpdated.connect(self.update_heading_preview)
         self._build_level_tab(self.use_scenes_cb, self.scene_editor, _("Scenes"))
 
@@ -331,10 +331,12 @@ class ExportDialog(QDialog):
         self.include_prompts_cb = QCheckBox(_("Include Action Beats (AI Prompts)"))
         self.include_summaries_cb = QCheckBox(_("Include Summaries"))
         self.clean_quotes_cb = QCheckBox(_('Convert curly quotes (“”, ‘’) to straight quotes (", \')'))
+        self.chapter_page_break_cb = QCheckBox(_("Start Chapters on New Page (E-book/HTML only)"))
 
         checkbox_layout.addWidget(self.include_prompts_cb)
         checkbox_layout.addWidget(self.include_summaries_cb)
         checkbox_layout.addWidget(self.clean_quotes_cb)
+        checkbox_layout.addWidget(self.chapter_page_break_cb)
 
         layout.addLayout(checkbox_layout)
         layout.addStretch()
@@ -460,10 +462,11 @@ class ExportDialog(QDialog):
         self.include_prompts_cb.setChecked(settings.get("include_prompts", False))
         self.include_summaries_cb.setChecked(settings.get("include_summaries", False))
         self.clean_quotes_cb.setChecked(settings.get("clean_quotes", False))
+        self.chapter_page_break_cb.setChecked(settings.get("chapter_page_break", False))
         self.use_acts_cb.setChecked(settings.get("use_acts", True))
         self.use_chapters_cb.setChecked(settings.get("use_chapters", True))
         self.use_scenes_cb.setChecked(settings.get("use_scenes", True))
-        self.body_font_combo.setCurrentText(settings.get("body_font_family", "Papyrus"))
+        self.body_font_combo.setCurrentText(settings.get("body_font_family", "Georgia"))
         self.body_size_combo.setCurrentText(settings.get("body_font_size", "12"))
 
 
@@ -490,18 +493,23 @@ class ExportDialog(QDialog):
 
         s_act = settings.get("start_act_idx", 0)
         s_ch = settings.get("start_ch_idx", 0)
-        e_act = settings.get("end_act_idx", len(self.acts)-1 if self.acts else 0)
-        e_ch = settings.get("end_ch_idx", 0) # Logic handled below
+        e_act = settings.get("end_act_idx", -1) 
+        e_ch = settings.get("end_ch_idx", -1)
 
         if 0 <= s_act < self.start_act_combo.count():
             self.start_act_combo.setCurrentIndex(s_act)
             if 0 <= s_ch < self.start_ch_combo.count():
                 self.start_ch_combo.setCurrentIndex(s_ch)
 
+        if e_act == -1:
+            e_act = self.end_act_combo.count() - 1
+
         if 0 <= e_act < self.end_act_combo.count():
             self.end_act_combo.setCurrentIndex(e_act)
             # Re-update list before setting chapter
             self._update_chapter_list(e_act, self.end_ch_combo)
+            if e_ch == -1:
+                e_ch = self.end_ch_combo.count() - 1
             if 0 <= e_ch < self.end_ch_combo.count():
                 self.end_ch_combo.setCurrentIndex(e_ch)
             else:
@@ -516,6 +524,7 @@ class ExportDialog(QDialog):
             "include_prompts": self.include_prompts_cb.isChecked(),
             "include_summaries": self.include_summaries_cb.isChecked(),
             "clean_quotes": self.clean_quotes_cb.isChecked(),
+            "chapter_page_break": self.chapter_page_break_cb.isChecked(),
             "use_acts": self.use_acts_cb.isChecked(),
             "use_chapters": self.use_chapters_cb.isChecked(),
             "use_scenes": self.use_scenes_cb.isChecked(),
@@ -834,6 +843,16 @@ by {author}
 
         if format_type in ("html", "epub"):
             style = self._build_css_style(fmt)
+            # Add specific logic for Chapter Page Breaks
+            if editor.level == "Chapter" and self.chapter_page_break_cb.isChecked():
+                # 1. page-break-before ensures a new page in EPUB/Print-ready HTML
+                # 2. We use a 'spacer' div with a height.
+                # 3. We use 'vh' (viewport height) or '%' instead of 'pt' for better "halfway" accuracy.
+                # 4. The &nbsp; (non-breaking space) is crucial; Apple Books ignores empty divs.
+                spacer_style = "height: 20vh; margin: 0; padding: 0; border: none; display: block;"
+                spacer = f'<div style="{spacer_style}">&nbsp;</div>'
+                return f'<div style="page-break-before: always;">{spacer}<{tag} style="{style}">{heading_text}</{tag}></div>'
+
             return f'<{tag} style="{style}">{heading_text}</{tag}>'
 
         elif format_type == "markdown":
