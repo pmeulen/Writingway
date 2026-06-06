@@ -1,13 +1,18 @@
 """
-TypedDict definitions for the compendium data model.
-
-These types mirror the JSON structure stored in `compendium.json`
-
-The `TypedDict` subclasses are still plain `dict` at runtime, so no conversion is needed
-to existing code.
+Compendium related types. Must be PyQt5 free
 """
+from __future__ import annotations
 
-from typing import TypedDict
+from enum import StrEnum
+from typing import Protocol, TypedDict
+
+
+# TypedDict definitions for the compendium data model.
+#
+# These types mirror the JSON structure stored in `compendium.json`
+
+# The `TypedDict` subclasses are still plain `dict` at runtime, so no conversion is needed
+# to existing code.
 
 # ---------------------------------------------------------------------------
 # Entry sub-types
@@ -105,3 +110,25 @@ class PovCharacter(TypedDict):
     uuid: str
     name: str
 
+
+class CompendiumEntryType(StrEnum):
+    ENTRY = "entry"
+    CATEGORY = "category"
+
+class CompendiumField(StrEnum):
+    OVERVIEW = "overview"
+    DETAILS = "details"
+    TAGS = "tags"
+    IMAGES = "images"
+    RELATIONSHIPS = "relationships"
+
+class EntryEditorEvents(Protocol):
+    def on_overview_changed(self) -> None: ...
+    def on_add_tag_requested(self, tag: CompendiumTag) -> None: ...
+    def on_save_requested(self) -> None: ...
+    def on_revert_requested(self) -> None: ...
+
+class CompendiumCoordinator(Protocol):
+    def on_project_selected(self, project_name: str) -> None: ...
+    def on_entry_selected(self, entry_uuid: str) -> None: ...
+    def on_entry_structure_changed(self) -> None: ...

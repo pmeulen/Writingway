@@ -30,6 +30,9 @@ class GlobalToolbar(QWidget):
         self.workbench_action = self.add_action("assets/icons/home.svg", _("Open Workbench"), self.controller.open_workbench)
         self.workshop_action = self.add_action("assets/icons/message-square.svg", _("Workshop Chat"), self.controller.open_workshop)
         self.enhanced_compendium_action = self.add_action("assets/icons/book-open.svg", _("Open Enhanced Compendium"), self.controller.open_enhanced_compendium)
+        self.enhanced_compendium_action = self.add_action(
+            "assets/icons/book-open.svg", _("Open Enhanced Compendium 2"), self.controller.open_enhanced_compendium2
+        )
         self.whisper_action = self.add_action("assets/icons/mic.svg", _("Open Whisper"), self.controller.open_whisper_app)
         self.web_llm_action = self.add_action("assets/icons/wikidata.svg", _("Open Web with LLM"), self.controller.open_web_llm)
         self.ia_action = self.add_action("assets/icons/arch.svg", _("Open Internet Archive"), self.controller.open_ia_window)

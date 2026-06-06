@@ -29,6 +29,7 @@ from PyQt5.QtWidgets import (
 
 if TYPE_CHECKING:
     from compendium.enhanced_compendium import EnhancedCompendiumWindow
+    from compendium.enhanced_compendium2 import EnhancedCompendiumWindow2
 
 import muse.prompt_handler as prompt_handler
 from compendium.compendium_panel import CompendiumPanel
@@ -95,7 +96,7 @@ class ProjectWindow(QMainWindow):
     focus_mode_shortcut: QShortcut
     autosave_timer: QTimer
 
-    def __init__(self, project_name: str, compendium_window: Optional["EnhancedCompendiumWindow"]):
+    def __init__(self, project_name: str, compendium_window: Optional["EnhancedCompendiumWindow"], compendium_window2: Optional["EnhancedCompendiumWindow2"]):
         super().__init__()
         self.model = ProjectModel(project_name)
         self.current_theme = WWSettingsManager.get_appearance_settings()["theme"]
@@ -103,6 +104,7 @@ class ProjectWindow(QMainWindow):
         self.tts_playing = False
         self.unsaved_preview = False
         self.enhanced_window = compendium_window
+        self.enhanced_window2 = compendium_window2
         self.worker: LLMWorker | None = None
         self.last_sidebar_width = 250
         self.init_ui()
@@ -836,7 +838,22 @@ class ProjectWindow(QMainWindow):
             return
 
         self.enhanced_window.open_with_entry(self.model.project_name, None)
+    
+    def open_enhanced_compendium2(self):
+        """Open the enhanced compendium 2 for this project, or focus it if already visible."""
+        if not self.enhanced_window:
+            QMessageBox.warning(self, _("Compendium"), _("Enhanced Compendium 2 is not available."))
+            return
 
+        if self.enhanced_window2.isVisible():
+            self.enhanced_window2._ensure_window_visible()
+            if self.enhanced_window2.project_name != self.model.project_name:
+                self.enhanced_window2.open_with_entry(self.model.project_name, None)
+            return
+
+        self.enhanced_window2.open_with_entry(self.model.project_name, None)
+
+        
     def repopulate_prompts(self):
         self.bottom_stack.prose_prompt_panel.repopulate_prompts()
 

@@ -24,6 +24,7 @@ from PyQt5.QtWidgets import (
 )
 
 from compendium.enhanced_compendium import EnhancedCompendiumWindow
+from compendium.enhanced_compendium2 import EnhancedCompendiumWindow2
 from project_window import project_settings_manager
 from project_window.project_window import ProjectWindow
 from settings.settings_dialog import SettingsDialog
@@ -391,7 +392,9 @@ class WorkbenchWindow(QMainWindow):
         self.init_ui()
         self.apply_fixed_stylesheet()
         self.enhanced_compendium = EnhancedCompendiumWindow(self)
+        self.enhanced_compendium2 = EnhancedCompendiumWindow2(self)
         self.enhanced_compendium.hide()
+        self.enhanced_compendium2.hide()
         self.last_opened_project = None
         self.open_project_windows = {}
         self.translation_manager.language_changed.connect(self.on_language_changed)
@@ -673,7 +676,7 @@ class WorkbenchWindow(QMainWindow):
         self.last_opened_project = project_name
         PROJECTS_DATA[LAST_DISPLAYED_KEY] = project_name
         save_projects(PROJECTS_DATA)
-        self.project_window = ProjectWindow(project_name, self.enhanced_compendium)
+        self.project_window = ProjectWindow(project_name, self.enhanced_compendium, self.enhanced_compendium2)
         self.open_project_windows[project_name] = self.project_window
         # Connect the window's destroyed signal to clean up the dictionary
         self.project_window.destroyed.connect(
