@@ -332,11 +332,15 @@ class ExportDialog(QDialog):
         self.include_summaries_cb = QCheckBox(_("Include Summaries"))
         self.clean_quotes_cb = QCheckBox(_('Convert curly quotes (“”, ‘’) to straight quotes (", \')'))
         self.chapter_page_break_cb = QCheckBox(_("Start Chapters on New Page (E-book/HTML only)"))
+        self.include_toc_cb = QCheckBox(_("Generate Table of Contents (E-book/HTML/PDF only)"))
+        self.ignore_acts_numbering_cb = QCheckBox(_("Ignore Acts when Numbering Chapters (Global Numbering)"))
 
         checkbox_layout.addWidget(self.include_prompts_cb)
         checkbox_layout.addWidget(self.include_summaries_cb)
         checkbox_layout.addWidget(self.clean_quotes_cb)
         checkbox_layout.addWidget(self.chapter_page_break_cb)
+        checkbox_layout.addWidget(self.include_toc_cb)
+        checkbox_layout.addWidget(self.ignore_acts_numbering_cb)
 
         layout.addLayout(checkbox_layout)
         layout.addStretch()
@@ -463,6 +467,8 @@ class ExportDialog(QDialog):
         self.include_summaries_cb.setChecked(settings.get("include_summaries", False))
         self.clean_quotes_cb.setChecked(settings.get("clean_quotes", False))
         self.chapter_page_break_cb.setChecked(settings.get("chapter_page_break", False))
+        self.include_toc_cb.setChecked(settings.get("include_toc", True))
+        self.ignore_acts_numbering_cb.setChecked(settings.get("ignore_acts_numbering", False))
         self.use_acts_cb.setChecked(settings.get("use_acts", True))
         self.use_chapters_cb.setChecked(settings.get("use_chapters", True))
         self.use_scenes_cb.setChecked(settings.get("use_scenes", True))
@@ -525,6 +531,8 @@ class ExportDialog(QDialog):
             "include_summaries": self.include_summaries_cb.isChecked(),
             "clean_quotes": self.clean_quotes_cb.isChecked(),
             "chapter_page_break": self.chapter_page_break_cb.isChecked(),
+            "include_toc": self.include_toc_cb.isChecked(),
+            "ignore_acts_numbering": self.ignore_acts_numbering_cb.isChecked(),
             "use_acts": self.use_acts_cb.isChecked(),
             "use_chapters": self.use_chapters_cb.isChecked(),
             "use_scenes": self.use_scenes_cb.isChecked(),
@@ -601,7 +609,14 @@ class ExportDialog(QDialog):
                 book.set_cover("cover.jpg", data)
 
             full_text = self._get_full_project_text("epub")
-            # full_text = full_text.replace('\n', '<br>')
+            
+            # Create TOC for EPUB sidebar
+            epub_toc = []
+            for entry in self.toc_entries:
+                epub_toc.append(epub.Link("content.xhtml#"+entry["id"], entry["title"], entry["id"]))
+            
+            book.toc = tuple(epub_toc)
+            
             # Simple single chapter for now; can be expanded to per-chapter
             c1 = EpubHtml(title=title, file_name="content.xhtml", lang="en")
             c1.content = f"""
@@ -621,7 +636,7 @@ class ExportDialog(QDialog):
             """
             book.add_item(c1)
 
-            book.toc = (epub.Link("content.xhtml", "Main Content", "content"),)
+            # book.toc = (epub.Link("content.xhtml", "Main Content", "content"),)
             book.spine = ['nav', c1]
             book.add_item(epub.EpubNcx())
             book.add_item(epub.EpubNav())
@@ -632,7 +647,16 @@ class ExportDialog(QDialog):
     def export_to_html(self, path: str, title: str, author: str):
         """Full HTML export."""
         full_text = self._get_full_project_text("html")
+        toc_html = ""
+        if self.include_toc_cb.isChecked():
+            toc_links = []
+            for entry in self.toc_entries:
+                margin = (entry['level'] - 1) * 20
+                toc_links.append(f'<li style="margin-left: {margin}px; list-style: none;">'
+                                f'<a href="#{entry["id"]}">{entry["title"]}</a></li>')
+            toc_html = f"<nav><h2>Contents</h2><ul>{''.join(toc_links)}</ul></nav><hr/>"
 
+        
         html_content = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -647,6 +671,7 @@ class ExportDialog(QDialog):
 <body>
     <h1>{title}</h1>
     <p><em>by {author}</em></p>
+    {toc_html}
     {full_text}
 </body>
 </html>"""
@@ -689,8 +714,10 @@ By {author}
         styled_html = header_html + full_content_html
 
         renderer.render_html_block(styled_html, body_font, body_size)
+        if self.include_toc_cb.isChecked():
+            doc.set_toc(renderer.pdf_toc)
 
-        doc.save(path)
+        doc.save(path, garbage=3, deflate=True, clean=True)
         doc.close()
 
     def export_to_text(self, path: str, title: str, author: str):
@@ -708,6 +735,8 @@ by {author}
         if not text:
             return ""
 
+        # This mapping fixes common "unsupported glyph" issues in basic fonts
+        # by converting specialized punctuation to standard ASCII punctuation.
         replacements = {
             '“': '"',   # left double
             '”': '"',   # right double
@@ -716,15 +745,13 @@ by {author}
             '—': '-',   # em dash
             '–': '-',   # en dash
             '…': '...', # ellipsis
+            '\u00A0': ' ',  # non-breaking space
             '\u2028': ' ',  # line separator
             '\u2029': ' ',  # paragraph separator
         }
 
         for old, new in replacements.items():
             text = text.replace(old, new)
-
-        # Remove any remaining non-ASCII that might cause issues
-        text = ''.join(c if ord(c) < 128 else ' ' for c in text)
 
         return text
 
@@ -753,16 +780,22 @@ by {author}
         body_style = f"font-family: '{body_font}', serif; font-size: {body_size}pt; line-height: 1.6;"
 
         content_parts = []
+        self.toc_entries = []
+        global_ch_idx = 0
+        ignore_acts = self.ignore_acts_numbering_cb.isChecked()
 
         for act_idx, act in enumerate(self.acts, 1):
             if act_idx < start_a or act_idx > end_a:
                 continue
 
             if use_acts:
+                heading_id = f"act_{act_idx}"
                 heading = self._apply_heading_format(
-                    act, act_idx, self.act_editor, format_type
+                    act, act_idx, self.act_editor, format_type, heading_id
                 )
                 content_parts.append(heading)
+                if not ignore_acts:
+                    self.toc_entries.append({"level": 1, "title": act.get("name", "Act"), "id": heading_id})
 
             if include_summaries:
                 hierarchy = [act.get("name")]
@@ -775,11 +808,25 @@ by {author}
                 if act_idx == start_a and ch_idx < start_c: continue
                 if act_idx == end_a and ch_idx > end_c: continue
 
+                global_ch_idx += 1
+                current_ch_num = global_ch_idx if ignore_acts else ch_idx
+
                 if use_chapters:
+                    heading_id = f"ch_{global_ch_idx}"
                     heading = self._apply_heading_format(
-                        chapter, ch_idx, self.chapter_editor, format_type
+                        chapter, ch_idx, self.chapter_editor, format_type, heading_id
                     )
                     content_parts.append(heading)
+
+                    toc_title = chapter.get("name", "Chapter")
+                    if ignore_acts:
+                        toc_title = HeadingFormatter.format_heading(
+                            self.chapter_editor.get_heading_format().template,
+                            toc_title, current_ch_num, 
+                            self.chapter_editor.get_numbering_index()
+                        )
+                    
+                    self.toc_entries.append({"level": 2, "title": toc_title, "id": heading_id})
 
                 if include_summaries:
                     hierarchy = [act.get("name"), chapter.get("name")]
@@ -815,7 +862,7 @@ by {author}
 
         return "\n\n".join(content_parts)
 
-    def _apply_heading_format(self, item: dict, number: int, editor, format_type: str) -> str:
+    def _apply_heading_format(self, item: dict, number: int, editor, format_type: str, anchor_id: str = "") -> str:
         """Apply full rich formatting + correct heading tag."""
         fmt = editor.get_heading_format()
         title = item.get("name", "Untitled")
@@ -843,6 +890,7 @@ by {author}
 
         if format_type in ("html", "epub"):
             style = self._build_css_style(fmt)
+            id_attr = f' id="{anchor_id}"' if anchor_id else ""
             # Add specific logic for Chapter Page Breaks
             if editor.level == "Chapter" and self.chapter_page_break_cb.isChecked():
                 # 1. page-break-before ensures a new page in EPUB/Print-ready HTML
@@ -851,9 +899,9 @@ by {author}
                 # 4. The &nbsp; (non-breaking space) is crucial; Apple Books ignores empty divs.
                 spacer_style = "height: 20vh; margin: 0; padding: 0; border: none; display: block;"
                 spacer = f'<div style="{spacer_style}">&nbsp;</div>'
-                return f'<div style="page-break-before: always;">{spacer}<{tag} style="{style}">{heading_text}</{tag}></div>'
+                return f'<div style="page-break-before: always;"{id_attr}>{spacer}<{tag} style="{style}">{heading_text}</{tag}></div>'
 
-            return f'<{tag} style="{style}">{heading_text}</{tag}>'
+            return f'<{tag}{id_attr} style="{style}">{heading_text}</{tag}>'
 
         elif format_type == "markdown":
             prefix = "#" * (1 if tag == "h1" else 2 if tag == "h2" else 3)
@@ -1149,22 +1197,18 @@ class TextStyle:
 class FontManager:
     """Resolves and caches PyMuPDF Font objects."""
     def __init__(self):
-        self._cache: dict[str, pymupdf.Font] = {}
-        self._font_refs: dict[str, str] = {} # Map file path to f0, f1...
+        self._font_cache: dict[str, pymupdf.Font] = {} # Stores Font objects for width calc
         self._faux_italic_flags: dict[str, bool] = {}
         self._system_fonts_cache: list[str] = []  # Cache of all full paths to font files
 
-    def get_font(self, family: str, bold: bool = False, italic: bool = False) -> tuple[pymupdf.Font, str, bool]:
+    def get_font(self, family: str, bold: bool = False, italic: bool = False) -> tuple[pymupdf.Font, bool]:
         """Returns a Font object and a unique reference name for it."""
         key = f"{family.lower()}_{'b' if bold else ''}{'i' if italic else ''}"
-        if key in self._cache:
-            return (
-                self._cache[key],
-                self._font_refs[key],
-                self._faux_italic_flags.get(key, False)
-            )
+        if key in self._font_cache:
+            return self._font_cache[key], self._faux_italic_flags.get(key, False)
 
         is_faux_italic = False
+        font_obj = None
         path = self._resolve_path(family, bold, italic)
 
         if not path and italic:
@@ -1176,26 +1220,13 @@ class FontManager:
             path = self._resolve_path(family, False, False)
 
         try:
-            font = pymupdf.Font(fontfile=path) if path else self._get_base14_fallback(bold, italic)
-        except:
-            font = self._get_base14_fallback(bold, italic)
+            font_obj = pymupdf.Font(fontfile=path) if path else pymupdf.Font("helv")
+        except Exception:
+            font_obj = pymupdf.Font("helv")
 
-        ref = f"f{len(self._cache)}"
-        self._cache[key] = font
-        self._font_refs[key] = ref
+        self._font_cache[key] = font_obj
         self._faux_italic_flags[key] = is_faux_italic
-        return font, ref, is_faux_italic
-
-    def _get_base14_fallback(self, bold: bool, italic: bool) -> pymupdf.Font:
-        """Returns the official Adobe Base-14 equivalent for Helvetica."""
-        if bold and italic:
-            return pymupdf.Font("Helvetica-BoldOblique")
-        if bold:
-            return pymupdf.Font("Helvetica-Bold")
-        if italic:
-            return pymupdf.Font("Helvetica-Oblique")
-
-        return pymupdf.Font("Helvetica")
+        return font_obj, is_faux_italic
 
     def _ensure_font_cache(self):
         """Builds a list of all available system font paths once."""
@@ -1206,8 +1237,8 @@ class FontManager:
         search_paths = []
         if sys_name == "Darwin":
             search_paths = [
-                "/System/Library/Fonts",
                 "/System/Library/Fonts/Supplemental",
+                "/System/Library/Fonts",
                 "/Library/Fonts",
                 os.path.expanduser("~/Library/Fonts")
             ]
@@ -1268,9 +1299,12 @@ class RichTextRenderer:
         self.page_height = 842
         self.y = self.margin
         self.current_page = None
+        self._fonts_on_page = set() # OPTIMIZATION: track fonts per page
+        self.pdf_toc = []
 
     def _new_page(self):
         self.current_page = self.doc.new_page()
+        self._fonts_on_page = set() # Reset for new page
         self.y = self.margin
         self.x = self.margin
         return self.current_page
@@ -1278,11 +1312,8 @@ class RichTextRenderer:
     def render_html_block(self, html: str, default_font: str, default_size: float):
         """Parses HTML into styled runs and draws them with wrapping."""
         if not self.current_page: self._new_page()
-
         soup = BeautifulSoup(html, "html.parser")
-        initial_style = TextStyle(default_font, default_size)
-
-        self._process_node(soup, initial_style)
+        self._process_node(soup, TextStyle(default_font, default_size))
 
     def _process_node(self, node, current_style: TextStyle):
         """Recursive tree walker to handle nested tags and block level spacing."""
@@ -1292,6 +1323,11 @@ class RichTextRenderer:
 
         # 2. Handle Block Start (Paragraphs/Headings)
         if is_block:
+            # If node has an ID or we know it's a heading
+            level = 1 if node.name == 'h1' else 2 if node.name == 'h2' else 3
+            if node.name in ['h1', 'h2', 'h3']:
+                self.pdf_toc.append([level, node.get_text(), self.doc.page_count])
+
             # If we aren't already at the start of a line, move to the next one
             if self.x != self.margin:
                 self._force_newline(new_style.font_size)
@@ -1301,9 +1337,9 @@ class RichTextRenderer:
         # 3. Handle Content
         if isinstance(node, NavigableString):
             self._draw_text(str(node), new_style)
-        elif node.name == 'br':
-                self._force_newline(new_style.font_size)
-        else:
+        elif hasattr(node, 'name') and node.name == 'br':
+            self._force_newline(new_style.font_size)
+        elif hasattr(node, 'children'):
             for child in node.children:
                 self._process_node(child, new_style)
 
@@ -1382,13 +1418,18 @@ class RichTextRenderer:
 
         if not display_text: return
 
-        font_obj, font_ref, is_faux = self.fm.get_font(style.font_family, style.bold, style.italic)
+        font_obj, is_faux = self.fm.get_font(style.font_family, style.bold, style.italic)
+        font_id = font_obj.name.replace(" ", "-")
 
-        # Ensure font is on current page
-        self.current_page.insert_font(fontname=font_ref, fontbuffer=font_obj.buffer)
+        if font_id not in self._fonts_on_page:
+            self.current_page.insert_font(
+                fontname=font_id, 
+                fontbuffer=font_obj.buffer, 
+                set_simple=False
+            )
+            self._fonts_on_page.add(font_id)
 
-        words = text.split(" ")
-        line_height = style.font_size * 1.4
+        words = display_text.split(" ")
 
         for i, word in enumerate(words):
             # Re-add the space we split on
@@ -1401,8 +1442,9 @@ class RichTextRenderer:
             if self.x + w_len > self.page_width - self.margin:
                 # Use our new force_newline to move down correctly
                 self._force_newline(style.font_size)
-                # Re-register font for potential new page
-                self.current_page.insert_font(fontname=font_ref, fontbuffer=font_obj.buffer)
+                if font_id not in self._fonts_on_page:
+                    self.current_page.insert_font(fontname=font_id, fontbuffer=font_obj.buffer, set_simple=False)
+                self._fonts_on_page.add(font_id)
 
                 # Since we just wrapped, re-calculate without the leading space
                 word_to_draw = word_to_draw.lstrip()
@@ -1423,8 +1465,8 @@ class RichTextRenderer:
                 insert_pos,
                 word_to_draw,
                 fontsize=style.font_size,
-                fontname=font_ref,
-                morph=morph_data # This applies the skew
+                fontname=font_id,
+                morph=morph_data, # This applies the skew
             )
             self.x += w_len
 
