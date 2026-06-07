@@ -141,13 +141,13 @@ class CompendiumWindowPresenter:
             # Transition into the no-project empty state
             self._compendium = CompendiumManager("", event_bus=self._event_bus)
             self._toolbar.load_projects([], None)
-            self._tree.reset_for_project("")
+            self._tree.reset_for_project("", compendium=self._compendium)
             self._editor.reset_for_project("")
         else:
             self._compendium = CompendiumManager(self._project_name, event_bus=self._event_bus)
-            # Propagate change to children (skeleton methods log the switch)
+            # Propagate change to children – pass the live manager so the tree can load real data
             self._toolbar.reset_for_project(self._project_name)
-            self._tree.reset_for_project(self._project_name)
+            self._tree.reset_for_project(self._project_name, compendium=self._compendium)
             self._editor.reset_for_project(self._project_name)
             if self._window_view is not None:
                 self._window_view.set_pane_enabled(Pane.EDITOR, False)
