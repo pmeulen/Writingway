@@ -16,11 +16,22 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
+from gettext import gettext as _
 from typing import TYPE_CHECKING, Protocol
 
-from PyQt5.QtWidgets import QWidget
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import (
+    QHBoxLayout,
+    QLineEdit,
+    QPushButton,
+    QSizePolicy,
+    QTreeWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from compendium.qt_mvp import QtWidgetABCMeta
+from settings.theme_manager import ThemeManager
 
 if TYPE_CHECKING:
     from compendium.compendium_manager import CompendiumManager
@@ -83,7 +94,33 @@ class CompendiumTreeWidget(QWidget, ICompendiumTreeView, metaclass=QtWidgetABCMe
         self._setup_widgets()
 
     def _setup_widgets(self) -> None:
-        """Build the tree widgets. Widgets will be added in later steps."""
+        """Build the tree widgets. Ported from EnhancedCompendiumWindow."""
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+
+        # 1) Search bar
+        self.search_bar = QLineEdit()
+        self.search_bar.setPlaceholderText(_("Search entries and tags..."))
+        self.main_layout.addWidget(self.search_bar)
+
+        # 2) Tree widget
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabel(_("Compendium"))
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.main_layout.addWidget(self.tree)
+
+        # 3) Toolbar (optional, but good for completeness if porting from EnhancedCompendiumWindow's intended structure)
+        self._setup_tree_toolbar()
+
+    def _setup_tree_toolbar(self) -> None:
+        """Add any tree-specific utility buttons at the bottom of the pane."""
+        self.toolbar_layout = QHBoxLayout()
+        
+        self.new_category_button = QPushButton(_("New Category"))
+        self.new_category_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        
+        self.toolbar_layout.addWidget(self.new_category_button)
+        self.main_layout.addLayout(self.toolbar_layout)
 
     def reset(self) -> None:
         """Reset the pane to its empty state. (Behaviour added in later steps.)"""

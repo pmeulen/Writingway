@@ -144,12 +144,15 @@ class CompendiumWindowWidget(QWidget, ICompendiumWindowView, metaclass=QtWidgetA
         """Lay out the toolbar above a splitter holding the tree and editor."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self._toolbar_view)
+        layout.setSpacing(0)
+
+        # The toolbar must not stretch vertically
+        layout.addWidget(self._toolbar_view, 0)
 
         self._splitter = QSplitter()
         self._splitter.addWidget(self._tree_view)
         self._splitter.addWidget(self._editor_view)
-        layout.addWidget(self._splitter)
+        layout.addWidget(self._splitter, 1)
 
     # --- ICompendiumWindowView implementation -----------------------------
     def show_pane(self, pane: Pane, visible: bool) -> None:

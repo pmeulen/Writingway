@@ -16,9 +16,16 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
+from gettext import gettext as _
 from typing import TYPE_CHECKING, Protocol
 
-from PyQt5.QtWidgets import QWidget
+from PyQt5.QtWidgets import (
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QSizePolicy,
+    QWidget,
+)
 
 from compendium.qt_mvp import QtWidgetABCMeta
 
@@ -81,7 +88,26 @@ class ProjectToolbarWidget(QWidget, IProjectToolbarView, metaclass=QtWidgetABCMe
         self._setup_widgets()
 
     def _setup_widgets(self) -> None:
-        """Build the toolbar widgets. Widgets will be added in later steps."""
+        """Build the toolbar widgets. Ported from EnhancedCompendiumWindow."""
+        # Note: Since this is now a QWidget pane, we use a layout instead
+        # of being a QMainWindow toolBar.
+        self.main_layout = QHBoxLayout(self)
+        self.main_layout.setContentsMargins(5, 5, 5, 5)
+        self.main_layout.setSpacing(10)
+
+        # Fix vertical size to the minimum required by the combo box
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+
+        self.label = QLabel(_("<b>Project:</b>"))
+        self.main_layout.addWidget(self.label)
+
+        self.project_combo = QComboBox()
+        self.main_layout.addWidget(self.project_combo)
+
+        # Spacer to push everything to the left
+        self.spacer = QWidget()
+        self.spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.main_layout.addWidget(self.spacer)
 
     def reset(self) -> None:
         """Reset the pane to its empty state. (Behaviour added in later steps.)"""
