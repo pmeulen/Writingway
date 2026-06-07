@@ -25,10 +25,10 @@ from PyQt5.QtWidgets import (
 from compendium.enhanced_compendium import EnhancedCompendiumWindow
 from project_window import project_settings_manager
 from project_window.project_window import ProjectWindow
-from exporter.export_dialog import show_export_dialog
 from settings.settings_dialog import SettingsDialog
 from settings.settings_manager import WWSettingsManager
 from settings.theme_manager import ThemeManager
+import exporter
 
 # Define the file used for storing project data.
 PROJECTS_FILE = "projects.json"
@@ -155,7 +155,7 @@ class ProjectPostIt(QToolButton):
             cover = self.project.get("cover")
             from project_window.project_model import ProjectModel
             model = ProjectModel(project_name)
-            show_export_dialog(self, project_name, model, cover_path=cover)
+            exporter.show_export_dialog(self, project_name, model, cover_path=cover)
         elif action == stats_action:
             try:
                 from util.statistics import show_statistics
