@@ -23,13 +23,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from .rag_utils import (
-    DocumentProcessorFactory,
-    LlmClient,
-    PdfProcessingWorker,
-    SettingsManager,
-    TokenCounter,
-)
+from .rag_utils import DocumentProcessorFactory, LlmClient, PdfProcessingWorker, SettingsManager, TokenCounter
 
 
 @dataclass

@@ -265,7 +265,7 @@ class EnhancedCompendiumWindow(QMainWindow):
         if self.current_entry_item is None:
             self._reset_dirty()
             return
-        
+
         current_item = self.current_entry_item
         current_entry_name = current_item.text(0)
         current_entry_uuid = self.current_entry_uuid
@@ -1053,24 +1053,24 @@ class EnhancedCompendiumWindow(QMainWindow):
                 logger.debug("load_entry: Suppressing unsaved changes prompt for entry load")
             else:
                 self.save_current_entry()
-        
+
         self.current_entry_item = entry_item
         entry_uuid = self._entry_uuid_from_item(entry_item)
         self.current_entry_uuid = entry_uuid
         logger.info(f"Loading entry '{entry_name}' with uuid '{entry_uuid}'")
-        
+
         self.entry_name_label.setText(entry_name)
         # Entry selected: show entry-specific actions; enabled state is handled by dirty tracking.
         self.save_button.show()
         self.revert_button.show()
         self.update_add_tag_button_state()
-        
+
         # Block signals while loading to avoid spuriously marking dirty.
         self.editor.blockSignals(True)
-        
+
         content_data = entry_item.data(1, Qt.ItemDataRole.UserRole)
         content = content_data if isinstance(content_data, str) else ""
-        self.editor.setPlainText(content)         
+        self.editor.setPlainText(content)
 
         # Load extended fields directly from the unified entry dict.
         entry_data: CompendiumEntry = self._find_entry_in_data(entry_uuid) or self.manager.make_empty_entry(entry_name, content)

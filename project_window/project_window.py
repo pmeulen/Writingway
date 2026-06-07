@@ -838,7 +838,7 @@ class ProjectWindow(QMainWindow):
             return
 
         self.enhanced_window.open_with_entry(self.model.project_name, None)
-    
+
     def open_enhanced_compendium2(self):
         """Open the enhanced compendium 2 for this project, or focus it if already visible."""
         if not self.enhanced_window:
@@ -853,7 +853,7 @@ class ProjectWindow(QMainWindow):
 
         self.enhanced_window2.open_with_entry(self.model.project_name, None)
 
-        
+
     def repopulate_prompts(self):
         self.bottom_stack.prose_prompt_panel.repopulate_prompts()
 

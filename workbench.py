@@ -1,9 +1,11 @@
 import json
+import logging
 import os
 import random
 import shutil
+from collections.abc import Callable
 from gettext import gettext as _
-from typing import Any, Callable, Protocol, TypedDict
+from typing import Any, Protocol, TypedDict
 
 from PyQt5.QtCore import QSize, Qt, pyqtSignal
 from PyQt5.QtGui import QIcon, QPixmap
@@ -30,6 +32,8 @@ from project_window.project_window import ProjectWindow
 from settings.settings_dialog import SettingsDialog
 from settings.settings_manager import WWSettingsManager
 from settings.theme_manager import ThemeManager
+
+logger = logging.getLogger(__name__)
 
 # Define the file used for storing project data.
 PROJECTS_FILE = "projects.json"
@@ -765,6 +769,28 @@ class WorkbenchProjectsModel(Protocol):
     def get_project_names(self) -> list[str]: ...
     def add_projects_changed_listener(self, listener: Callable[[list[str]], None]) -> None: ...
     def remove_projects_changed_listener(self, listener: Callable[[list[str]], None]) -> None: ...
+
+
+class SimpleWorkbenchProjectsAdapter:
+    """Adapter implementing WorkbenchProjectsModel via the legacy workbench.load_projects() API.
+
+    Provides project names to presenters (e.g., ProjectToolbarPresenter) until WorkbenchModel is extracted.
+    """
+
+    def __init__(self) -> None:
+        self._listeners: list[Callable[[list[str]], None]] = []
+
+    def get_project_names(self) -> list[str]:
+        data = load_projects()
+        return [p["name"] for p in data.get("projects", [])]
+
+    def add_projects_changed_listener(self, listener: Callable[[list[str]], None]) -> None:
+        if listener not in self._listeners:
+            self._listeners.append(listener)
+
+    def remove_projects_changed_listener(self, listener: Callable[[list[str]], None]) -> None:
+        if listener in self._listeners:
+            self._listeners.remove(listener)
 
 
 if __name__ == "__main__":

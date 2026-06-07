@@ -90,6 +90,10 @@ class EntryEditorPresenter:
         """Give the presenter its View once both objects exist."""
         self._view = view
 
+    def reset_for_project(self, project_name: str) -> None:
+        """Skeleton: log the project switch. Real behaviour added later."""
+        logger.info(f"EntryEditorPresenter reset_for_project: {project_name}")
+
 
 # ---------------------------------------------------------------------------
 # EntryEditorWidget (the only PyQt5 code in this module)

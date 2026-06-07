@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 
 from PyQt5.QtWidgets import QMainWindow
 
-from compendium.compendium_manager import CompendiumEventBus, CompendiumManager
 from compendium.compendium_window_pane import CompendiumWindowPresenter, CompendiumWindowWidget
 
 if TYPE_CHECKING:
@@ -38,31 +37,38 @@ class EnhancedCompendiumWindow2(QMainWindow):
             raise TypeError("EnhancedCompendiumWindow must be initialized with a WorkbenchWindow parent")
         self.parent_window: WorkbenchWindow = parent
 
-        # Shared event bus: notifies all listeners (this window, project panel, POV selector, …) whenever
-        # the compendium file is written.
-        self.event_bus = CompendiumEventBus.get_instance()
+        # MVP: The CompendiumWindowPresenter is the coordinating presenter that owns the three child presenters
+        # that are connected to the three panes (toolbar, tree, editor).
+        self.presenter = CompendiumWindowPresenter(None)    # Create with no project selected
 
-        # Model. The project is "default" until the window becomes visible / a
-        # project is selected (behaviour added in later steps).
-        self.project_name = "default"
-        self.manager = CompendiumManager(self.project_name, event_bus=self.event_bus)
+        from workbench import SimpleWorkbenchProjectsAdapter
 
-        # MVP: A coordinating presenter owns the three child presenters that lays out the three child Views.
-        # The panes are currently empty skeletons.
-        self.presenter = CompendiumWindowPresenter(self.manager)
+        adapter = SimpleWorkbenchProjectsAdapter()
+
+        # MVP: The CompendiumWindowWidget is the main window view that contains the three panes (toolbar, tree, editor)
+        # and implements the ICompendiumWindowView contract.
         self.window_view = CompendiumWindowWidget(self.presenter)
         self.presenter.set_window_view(self.window_view)
-        self.setCentralWidget(self.window_view)
+
+        self.setCentralWidget(self.window_view) # QMainWindow.setCentralWidget()
+
+        # Wire the adapter into the ProjectToolbarPresenter (replaces the old direct
+        # load_projects + toolbar_presenter.load_projects path).
+        toolbar_presenter = self.presenter.toolbar_presenter
+        toolbar_presenter.set_workbench_projects_model(adapter)
 
         self.setWindowTitle(_("Enhanced Compendium 2"))
         self.resize(900, 700)
 
     def open_with_entry(self, project_name: str, entry_uuid: str | None) -> None:
         # TODO: Switch projects to uuid
-        """Make visible and raise window, then show the entry.
-        """
+        """Make visible and raise window. Switch to "project" if needed. Then select "entry_uuid" in that project."""
 
         logger.info(f"Opening Enhanced Compendium Window 2. project_uuid={project_name}, entry_uuid={entry_uuid}")
+
+        if project_name:
+            self.presenter.switch_to_project(project_name)
+
         # Show the window before prompting so the dialog context is obvious.
         self._ensure_window_visible()
 
@@ -74,3 +80,12 @@ class EnhancedCompendiumWindow2(QMainWindow):
             self.show()
         self.raise_()
         self.activateWindow()
+
+    def closeEvent(self, event) -> None:
+        """Ensure presenters are cleaned up (listeners unregistered) when the window closes."""
+        if hasattr(self, "presenter") and hasattr(self.presenter, "destroy"):
+            try:
+                self.presenter.destroy()
+            except Exception:
+                logger.warning("destroy() on presenter raised an exception during closeEvent", exc_info=True)
+        super().closeEvent(event)

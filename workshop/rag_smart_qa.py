@@ -27,12 +27,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from .rag_utils import (
-    DocumentProcessorFactory,
-    LlmClient,
-    SettingsManager,
-    TokenCounter,
-)
+from .rag_utils import DocumentProcessorFactory, LlmClient, SettingsManager, TokenCounter
 
 
 class EnhancedPdfProcessor:

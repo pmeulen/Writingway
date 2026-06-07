@@ -20,18 +20,9 @@ from gettext import gettext as _
 from typing import TYPE_CHECKING, Protocol
 
 from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import (
-    QHBoxLayout,
-    QLineEdit,
-    QPushButton,
-    QSizePolicy,
-    QTreeWidget,
-    QVBoxLayout,
-    QWidget,
-)
+from PyQt5.QtWidgets import QHBoxLayout, QLineEdit, QPushButton, QSizePolicy, QTreeWidget, QVBoxLayout, QWidget
 
 from compendium.qt_mvp import QtWidgetABCMeta
-from settings.theme_manager import ThemeManager
 
 if TYPE_CHECKING:
     from compendium.compendium_manager import CompendiumManager
@@ -81,6 +72,10 @@ class CompendiumTreePresenter:
         """Give the presenter its View once both objects exist."""
         self._view = view
 
+    def reset_for_project(self, project_name: str) -> None:
+        """Skeleton: log the project switch. Real behaviour added later."""
+        logger.info(f"CompendiumTreePresenter reset_for_project: {project_name}")
+
 
 # ---------------------------------------------------------------------------
 # CompendiumTreeWidget (the only PyQt5 code in this module)
@@ -115,10 +110,10 @@ class CompendiumTreeWidget(QWidget, ICompendiumTreeView, metaclass=QtWidgetABCMe
     def _setup_tree_toolbar(self) -> None:
         """Add any tree-specific utility buttons at the bottom of the pane."""
         self.toolbar_layout = QHBoxLayout()
-        
+
         self.new_category_button = QPushButton(_("New Category"))
         self.new_category_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        
+
         self.toolbar_layout.addWidget(self.new_category_button)
         self.main_layout.addLayout(self.toolbar_layout)
 

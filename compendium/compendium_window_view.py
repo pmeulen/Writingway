@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import enum
-from abc import ABC, abstractmethod
+from abc import ABC
 
 
 class Pane(enum.Enum):

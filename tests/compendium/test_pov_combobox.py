@@ -11,12 +11,7 @@ import pytest
 from PyQt5.QtCore import Qt
 
 from compendium.compendium_manager import CompendiumManager
-from compendium.pov_combobox import (
-    NEW_CHARACTER_UUID,
-    NONE_CHARACTER_UUID,
-    POVComboBox,
-    POVItemData,
-)
+from compendium.pov_combobox import NEW_CHARACTER_UUID, NONE_CHARACTER_UUID, POVComboBox, POVItemData
 
 # ---------------------------------------------------------------------------
 # Helper to build a POVComboBox for a sandboxed project

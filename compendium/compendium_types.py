@@ -6,7 +6,6 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Protocol, TypedDict
 
-
 # TypedDict definitions for the compendium data model.
 #
 # These types mirror the JSON structure stored in `compendium.json`

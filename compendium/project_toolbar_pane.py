@@ -16,21 +16,17 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from gettext import gettext as _
 from typing import TYPE_CHECKING, Protocol
 
-from PyQt5.QtWidgets import (
-    QComboBox,
-    QHBoxLayout,
-    QLabel,
-    QSizePolicy,
-    QWidget,
-)
+from PyQt5.QtWidgets import QComboBox, QHBoxLayout, QLabel, QSizePolicy, QWidget
 
 from compendium.qt_mvp import QtWidgetABCMeta
 
 if TYPE_CHECKING:
     from compendium.compendium_types import CompendiumCoordinator
+    from workbench import WorkbenchProjectsModel
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +42,11 @@ class IProjectToolbarView(ABC):
         """Reset the pane to its empty state. (Behaviour added in later steps.)"""
         ...
 
+    @abstractmethod
+    def populate_projects(self, projects: list[str], current_project: str | None) -> None:
+        """Replace combo contents with the given project list and optionally pre-select current_project."""
+        ...
+
 
 # ---------------------------------------------------------------------------
 # ProjectToolbarEvents (View -> Presenter)
@@ -53,7 +54,9 @@ class IProjectToolbarView(ABC):
 class ProjectToolbarEvents(Protocol):
     """What the project-toolbar view can tell its presenter. Implemented by the presenter."""
 
-    # Intent methods (e.g. ``on_project_selected``) will be added in later steps.
+    def on_project_selected(self, project_name: str) -> None:
+        """User selected a different project in the combo box."""
+        ...
 
 
 # ---------------------------------------------------------------------------
@@ -70,10 +73,66 @@ class ProjectToolbarPresenter:
         logger.debug("Initializing ProjectToolbarPresenter")
         self._coordinator = coordinator
         self._view: IProjectToolbarView | None = None
+        self._workbench_projects_model: WorkbenchProjectsModel | None = None
+        self._projects_changed_listener: Callable[[list[str]], None] | None = None
+        self._last_selected_project: str | None = None
 
     def set_view(self, view: IProjectToolbarView) -> None:
         """Give the presenter its View once both objects exist."""
         self._view = view
+
+    def on_project_selected(self, project_name: str) -> None:
+        """Handle project selection from the view and forward to coordinator."""
+        logger.info(f"ProjectToolbarPresenter received project selection: {project_name}")
+        self._last_selected_project = project_name
+        self._coordinator.on_project_selected(project_name)
+
+    def reset_for_project(self, project_name: str) -> None:
+        """Skeleton: log the project switch. Real behaviour added later."""
+        logger.info(f"ProjectToolbarPresenter reset_for_project: {project_name}")
+
+    def load_projects(self, projects: list[str], current_project: str | None = None) -> None:
+        """Load project list into the view (called by window or parent)."""
+        if self._view is not None:
+            self._view.populate_projects(projects, current_project)
+
+    def set_workbench_projects_model(self, model: WorkbenchProjectsModel) -> None:
+        """Inject the workbench projects model, register listener and perform initial load."""
+        logger.debug("ProjectToolbarPresenter.set_workbench_projects_model called")
+        # Unregister previous listener if any
+        if self._workbench_projects_model is not None and self._projects_changed_listener is not None:
+            self._workbench_projects_model.remove_projects_changed_listener(self._projects_changed_listener)
+
+        self._workbench_projects_model = model
+        self._projects_changed_listener = self._on_projects_changed
+        model.add_projects_changed_listener(self._projects_changed_listener)
+
+        # Initial load
+        names = model.get_project_names()
+        self._on_projects_changed(names)
+
+    def _on_projects_changed(self, new_names: list[str]) -> None:
+        """Handle project list change notification from the model; preserve selection when possible."""
+        # Preserve the last known good selection when possible
+        preserved = None
+        if self._last_selected_project and self._last_selected_project in new_names:
+            preserved = self._last_selected_project
+        elif new_names:
+            preserved = new_names[0]
+
+        if self._view is not None:
+            self._view.populate_projects(new_names, preserved)
+
+        # Remember what we selected for future change events
+        self._last_selected_project = preserved
+
+    def destroy(self) -> None:
+        """Explicit cleanup: unregister listener to prevent memory leaks."""
+        if self._workbench_projects_model is not None and self._projects_changed_listener is not None:
+            self._workbench_projects_model.remove_projects_changed_listener(self._projects_changed_listener)
+            self._projects_changed_listener = None
+            self._workbench_projects_model = None
+        logger.debug("ProjectToolbarPresenter.destroy completed")
 
 
 # ---------------------------------------------------------------------------
@@ -102,6 +161,7 @@ class ProjectToolbarWidget(QWidget, IProjectToolbarView, metaclass=QtWidgetABCMe
         self.main_layout.addWidget(self.label)
 
         self.project_combo = QComboBox()
+        self.project_combo.currentTextChanged.connect(self._on_project_combo_changed)
         self.main_layout.addWidget(self.project_combo)
 
         # Spacer to push everything to the left
@@ -109,5 +169,22 @@ class ProjectToolbarWidget(QWidget, IProjectToolbarView, metaclass=QtWidgetABCMe
         self.spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.main_layout.addWidget(self.spacer)
 
+    def _on_project_combo_changed(self, project_name: str) -> None:
+        """Forward combo selection to the presenter via the events protocol."""
+        if project_name:
+            self._events.on_project_selected(project_name)
+
     def reset(self) -> None:
         """Reset the pane to its empty state. (Behaviour added in later steps.)"""
+        self.project_combo.clear()
+
+    def populate_projects(self, projects: list[str], current_project: str | None) -> None:
+        """Replace combo contents and optionally pre-select the current project."""
+        self.project_combo.blockSignals(True)
+        self.project_combo.clear()
+        self.project_combo.addItems(projects)
+        if current_project and current_project in projects:
+            self.project_combo.setCurrentText(current_project)
+        elif projects:
+            self.project_combo.setCurrentIndex(0)
+        self.project_combo.blockSignals(False)

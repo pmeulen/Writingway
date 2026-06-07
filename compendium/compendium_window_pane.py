@@ -1,21 +1,16 @@
 """
 Composing pane (window) for the (MVP) Enhanced Compendium window.
 
-Per ``tasks/mvp.md`` §6, the Enhanced Compendium window decomposes into three
-panes (project toolbar, compendium tree, entry editor).  This module owns the
-*composition*:
+The Enhanced Compendium window decomposes into three panes: project toolbar,
+compendium tree, and entry editor. This module owns the *composition*:
 
-* ``Pane`` - domain enum used by the composition contract (no Qt types).
-* ``ICompendiumWindowView`` - the composition View contract (show/hide/switch).
-* ``CompendiumWindowWidget`` - the composing Qt View; lays out the three child
-  Views and implements ``ICompendiumWindowView`` (the only PyQt5 code here).
-* ``CompendiumWindowPresenter`` - the coordinating presenter; owns the three
+* `Pane` - domain enum used by the composition contract (no Qt types).
+* `ICompendiumWindowView` - the composition View contract (show/hide/switch).
+* `CompendiumWindowWidget` - the composing Qt View; lays out the three child
+  Views and implements `ICompendiumWindowView` (the only PyQt5 code here).
+* `CompendiumWindowPresenter` - the coordinating presenter; owns the three
   child presenters, holds the composition View, and implements the
-  ``CompendiumCoordinator`` cross-pane contract.
-
-The composition is currently a skeleton: child panes are empty and the
-coordinator only wires the pieces together.  Behaviour will be added in later
-steps.
+  `CompendiumCoordinator` cross-pane contract.
 """
 from __future__ import annotations
 
@@ -26,13 +21,14 @@ from typing import TYPE_CHECKING
 
 from PyQt5.QtWidgets import QSplitter, QVBoxLayout, QWidget
 
+from compendium.compendium_manager import CompendiumEventBus, CompendiumManager
 from compendium.compendium_tree_pane import CompendiumTreePresenter, CompendiumTreeWidget
 from compendium.entry_editor_pane import EntryEditorPresenter, EntryEditorWidget
 from compendium.project_toolbar_pane import ProjectToolbarPresenter, ProjectToolbarWidget
 from compendium.qt_mvp import QtWidgetABCMeta
 
 if TYPE_CHECKING:
-    from compendium.compendium_manager import CompendiumManager
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -71,14 +67,43 @@ class CompendiumWindowPresenter:
     a skeleton: cross-pane behaviour will be added in later steps.
     """
 
-    def __init__(self, compendium: CompendiumManager) -> None:
-        logger.debug("Initializing CompendiumWindowPresenter")
-        self._compendium = compendium
+    def __init__(self, project_name: str | None) -> None:
+        logger.debug(f"Initializing CompendiumWindowPresenter for project: {project_name}")
+        self._project_name: str | None = None
+        self._event_bus = CompendiumEventBus.get_instance()
+
+        # Resolve project name: treat missing / non-existent names as None
+        resolved_name: str | None = None
+        if project_name:
+            try:
+                from workbench import PROJECTS
+                names = [p.get("name", "") for p in PROJECTS if isinstance(p, dict)]
+                if project_name in names:
+                    resolved_name = project_name
+            except Exception:
+                # If workbench import fails we conservatively treat the supplied name as invalid
+                resolved_name = None
+
+        self._project_name = resolved_name
+        if self._project_name is None:
+            # Create a lightweight placeholder manager that will be replaced on first switch
+            # We still need a valid object for the child presenters; using an empty name keeps it safe.
+            self._compendium = CompendiumManager("", event_bus=self._event_bus)
+        else:
+            self._compendium = CompendiumManager(self._project_name, event_bus=self._event_bus)
+
         self._window_view: ICompendiumWindowView | None = None
         # The coordinator owns the three child presenters and is their coordinator.
         self._toolbar = ProjectToolbarPresenter(coordinator=self)
-        self._tree = CompendiumTreePresenter(compendium, coordinator=self)
-        self._editor = EntryEditorPresenter(compendium, coordinator=self)
+        self._tree = CompendiumTreePresenter(self._compendium, coordinator=self)
+        self._editor = EntryEditorPresenter(self._compendium, coordinator=self)
+
+        if self._project_name is None:
+            # Drive toolbar, tree and editor into the required no-project placeholder states
+            self._toolbar.load_projects([], None)
+            # The child presenters expose reset_for_project; passing "" signals the empty state
+            self._tree.reset_for_project("")
+            self._editor.reset_for_project("")
 
     @property
     def toolbar_presenter(self) -> ProjectToolbarPresenter:
@@ -97,15 +122,51 @@ class CompendiumWindowPresenter:
         self._window_view = window_view
 
     # --- CompendiumCoordinator implementation -----------------------------
-    # (cross-pane intents; behaviour will be added in later steps)
     def on_project_selected(self, project_name: str) -> None:
-        """Handle a project switch from the toolbar. Skeleton."""
+        """Handle a project switch from the toolbar."""
+        self.switch_to_project(project_name)
+
+    def switch_to_project(self, project_name: str | None) -> None:
+        """Single public entry point for switching the active project.
+
+        Idempotent: if the project is unchanged, the call returns early.
+        Recreates the CompendiumManager and notifies child presenters.
+        Accepts None to represent the "no project" state.
+        """
+        if project_name == self._project_name:
+            return
+        logger.info(f"CompendiumWindowPresenter switching to project: {project_name}")
+        self._project_name = project_name
+        if project_name is None:
+            # Transition into the no-project empty state
+            self._compendium = CompendiumManager("", event_bus=self._event_bus)
+            self._toolbar.load_projects([], None)
+            self._tree.reset_for_project("")
+            self._editor.reset_for_project("")
+        else:
+            self._compendium = CompendiumManager(self._project_name, event_bus=self._event_bus)
+            # Propagate change to children (skeleton methods log the switch)
+            self._toolbar.reset_for_project(self._project_name)
+            self._tree.reset_for_project(self._project_name)
+            self._editor.reset_for_project(self._project_name)
+            if self._window_view is not None:
+                self._window_view.set_pane_enabled(Pane.EDITOR, False)
 
     def on_entry_selected(self, entry_uuid: str) -> None:
         """Handle an entry selection from the tree. Skeleton."""
 
     def on_entry_structure_changed(self) -> None:
         """Handle add/delete/rename/move of categories or entries. Skeleton."""
+
+    def destroy(self) -> None:
+        """Explicit cleanup: propagate destroy() to child presenters (toolbar, tree, editor)."""
+        for child in (self._toolbar, self._tree, self._editor):
+            if hasattr(child, "destroy"):
+                try:
+                    child.destroy()
+                except Exception:
+                    logger.warning(f"destroy() on child presenter {type(child).__name__} raised an exception", exc_info=True)
+        logger.debug("CompendiumWindowPresenter.destroy completed")
 
 
 # ---------------------------------------------------------------------------
