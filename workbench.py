@@ -3,7 +3,7 @@ import os
 import random
 import shutil
 from gettext import gettext as _
-from typing import Any, TypedDict
+from typing import Any, Callable, Protocol, TypedDict
 
 from PyQt5.QtCore import QSize, Qt, pyqtSignal
 from PyQt5.QtGui import QIcon, QPixmap
@@ -748,6 +748,24 @@ class WorkbenchWindow(QMainWindow):
         """ Extract a list of "name" values from the PROJECTS list of dicts """
         project_list = [project.get("name", "Unnamed Project") for project in PROJECTS]
         return project_list
+
+
+# ---------------------------------------------------------------------------
+# Quick and dirty WorkbenchProjectsModel for providing project list data and
+# updates to presenters that need it (e.g. ProjectToolbarPresenter).
+# ---------------------------------------------------------------------------
+
+
+class WorkbenchProjectsModel(Protocol):
+    """PyQt-free protocol that exposes the workbench project list to presenters.
+
+    Temporary home; will move when a proper WorkbenchModel is extracted.
+    """
+
+    def get_project_names(self) -> list[str]: ...
+    def add_projects_changed_listener(self, listener: Callable[[list[str]], None]) -> None: ...
+    def remove_projects_changed_listener(self, listener: Callable[[list[str]], None]) -> None: ...
+
 
 if __name__ == "__main__":
     import sys
