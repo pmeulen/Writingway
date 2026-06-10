@@ -37,3 +37,4 @@ markdown
 markdownify
 roman
 kanjize
+num2words

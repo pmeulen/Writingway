@@ -1,6 +1,7 @@
 import importlib.metadata
 import logging
 import sys
+from settings.translation_manager import TranslationManager # must import before gettext
 from gettext import gettext as _
 
 # Save the original metadata function
@@ -52,7 +53,6 @@ importlib.metadata.version = hooked_version
 import whisper
 
 from settings.settings_manager import WWSettingsManager
-from settings.translation_manager import TranslationManager
 
 
 def exception_hook(exctype, value, traceback):

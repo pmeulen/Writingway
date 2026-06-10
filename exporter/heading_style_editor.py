@@ -15,7 +15,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from exporter.heading_formatter import HeadingFormat, HeadingFormatter
+from exporter.heading_formatter import ARABIC, KANJI, ROMAN, WORD, HeadingFormat, HeadingFormatter
 from settings.settings_manager import WWSettingsManager
 from settings.theme_manager import ThemeManager
 
@@ -68,7 +68,8 @@ class HeadingStyleEditor(QWidget):
         self.numbering_combo.addItems([
             "Number: 1, 2, 3...",
             "Roman: I, II, III...",
-            "Kanji: 一, 二, 三..."
+            "Kanji: 一, 二, 三...",
+            "Word: One, Two, ..."
         ])
         self.numbering_combo.currentIndexChanged.connect(self._on_numbering_changed)
         controls_layout.addWidget(numbering_label)
@@ -240,10 +241,10 @@ class HeadingStyleEditor(QWidget):
         """Updates the combo box state to match the editor text."""
         text = self.editor.toPlainText()
         # Normalize to {num} to find a match in the preset list
-        normalized = text.replace("{roman}", "{num}").replace("{kanji}", "{num}")
-        
+        normalized = text.replace("{roman}", "{num}").replace("{kanji}", "{num}").replace("{word}", "{num}")
+
         idx = self.template_combo.findText(normalized)
-        
+
         # We don't need blockSignals here if we use .activated for the combo,
         # but it's still good practice to prevent currentIndexChanged side-effects
         self.template_combo.blockSignals(True)
@@ -257,33 +258,33 @@ class HeadingStyleEditor(QWidget):
 
     def _on_numbering_changed(self, index: int):
         """Swaps placeholders in the editor based on numbering selection without losing user text."""
-        placeholder_map = {0: "{num}", 1: "{roman}", 2: "{kanji}"}
+        placeholder_map = {ARABIC: "{num}", ROMAN: "{roman}", KANJI: "{kanji}", WORD: "{word}"}
         target = placeholder_map.get(index, "{num}")
-        
+
         text = self.editor.toPlainText()
         # Replace any existing placeholder with the new one
-        for p in ["{num}", "{roman}", "{kanji}"]:
+        for p in ["{num}", "{roman}", "{kanji}", "{word}"]:
             if p in text:
                 text = text.replace(p, target)
-        
+
         self.editor.setPlainText(text)
         self.previewUpdated.emit()
 
     def _on_template_changed(self, index: int):
         """Overwrites the editor with a preset, but respects the current numbering style."""
         template_text = self.template_combo.currentText()
-        
+
         # Don't overwrite if the user selects "Custom" or if it's empty
         if template_text == _("Custom") or not template_text:
             return
 
         # Get current numbering placeholder
-        placeholder_map = {0: "{num}", 1: "{roman}", 2: "{kanji}"}
+        placeholder_map = {ARABIC: "{num}", ROMAN: "{roman}", KANJI: "{kanji}", WORD: "{word}"}
         target = placeholder_map.get(self.numbering_combo.currentIndex(), "{num}")
 
         # Templates in the combo always use {num}, convert it to the active style
         new_text = template_text.replace("{num}", target)
-        
+
         self.editor.setPlainText(new_text)
         self.previewUpdated.emit()
 
@@ -299,10 +300,12 @@ class HeadingStyleEditor(QWidget):
             }.get(self.level, "Chapter {num}: {title}")
             template_text = default
 
-        if numbering_idx == 1:  # Roman
+        if numbering_idx == ROMAN:
             heading = template_text.replace("{num}", "{roman}")
-        elif numbering_idx == 2:  # Kanji
+        elif numbering_idx == KANJI:
             heading = template_text.replace("{num}", "{kanji}")
+        elif numbering_idx == WORD:
+            heading = template_text.replace("{num}", "{word}")
         else:
             heading = template_text
 
@@ -339,7 +342,7 @@ class HeadingStyleEditor(QWidget):
         self.font_size_combo.setCurrentText(str(heading_fmt.font_size))
 
         # In case the user entered {roman} or {kanji}, find the {num} template that matches
-        lookup = heading_fmt.template.replace("{roman}", "{num}").replace("{kanji}", "{num}")
+        lookup = heading_fmt.template.replace("{roman}", "{num}").replace("{kanji}", "{num}").replace("{word}", "{num}")
         idx = self.template_combo.findText(lookup)
 
         if idx != -1:

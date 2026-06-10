@@ -1,3 +1,4 @@
+from gettext import gettext as _
 
 # Try to import numbering libraries, provide fallbacks if missing
 try:
@@ -10,6 +11,10 @@ try:
 except ImportError:
     kanjize = None
 
+ARABIC = 0
+ROMAN = 1
+KANJI = 2
+WORD = 3
 
 class HeadingFormatter:
     """Shared utility for formatting headings with numbering support."""
@@ -32,18 +37,22 @@ class HeadingFormatter:
         """
         result = template.replace("{title}", title)
 
-        if numbering_index == 1:  # Roman
+        if numbering_index == ROMAN:
             roman = NumberingUtility.to_roman(number)
             result = result.replace("{num}", roman).replace("{roman}", roman)
-        elif numbering_index == 2:  # Kanji
+        elif numbering_index == KANJI:
             kanji = NumberingUtility.to_kanji(number)
             result = result.replace("{num}", kanji).replace("{kanji}", kanji)
+        elif numbering_index == WORD:
+            word = NumberingUtility.to_word(number)
+            result = result.replace("{num}", word).replace("{word}", word)
         else:  # Arabic
             result = result.replace("{num}", str(number))
 
         # Replace any leftover placeholders
         result = result.replace("{roman}", NumberingUtility.to_roman(number))
         result = result.replace("{kanji}", NumberingUtility.to_kanji(number))
+        result = result.replace("{word}", NumberingUtility.to_word(number))
 
         return result
 
@@ -84,7 +93,7 @@ class HeadingFormat:
 
 class NumberingUtility:
     """Handles conversion of integers to various book numbering styles."""
-    
+
     @staticmethod
     def to_roman(n: int) -> str:
         if roman:
@@ -105,6 +114,17 @@ class NumberingUtility:
 
     @staticmethod
     def to_word(n: int) -> str:
+        try:
+            from num2words import num2words
+
+            from main import translation_manager
+            if translation_manager.current_language in ('jp', 'zh'):
+                raise NotImplementedError("Use {kanji} if you want kanji") # Let Asians use English words
+            word = num2words(n, lang = translation_manager.current_language).capitalize()
+            return word
+        except NotImplementedError:
+            return num2words(n, lang = 'en').capitalize()
+        except:
         # Simple word fallback for common chapter counts
-        words = ["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten"]
-        return words[n] if n < len(words) else str(n)
+            words = [_("Zero"), _("One"), _("Two"), _("Three"), _("Four"), _("Five"), _("Six"), _("Seven"), _("Eight"), _("Nine"), _("Ten")]
+            return words[n] if n < len(words) else str(n)

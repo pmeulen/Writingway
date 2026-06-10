@@ -1,8 +1,24 @@
 import gettext
 import logging
 import os
+import builtins
 
 from PyQt5.QtCore import QObject, pyqtSignal
+
+_ACTIVE_TRANSLATION_FUNC = lambda x: x 
+def _proxy_translator(message):
+    """
+    This replaces gettext.gettext. It looks for the '_' function 
+    that gettext.install() puts into builtins.
+    """
+    # If translation.install() has been called, use that. 
+    # Otherwise, return the message as is.
+    t = getattr(builtins, '_', lambda x: x)
+    return t(message)
+
+# Monkey-patch the gettext module IMMEDIATELY when this file is imported.
+# This ensures that any file doing 'from gettext import gettext' gets our proxy.
+gettext.gettext = _proxy_translator
 
 # List of supported languages
 LANGUAGES = ["en", "de", "es", "fr", "pt", "pl", "ru", "ja", "zh", "ko"]

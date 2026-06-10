@@ -1,25 +1,42 @@
-# ruff: noqa: RUF001
+# ruff: noqa: RUF001, E701, E702
 import os
 import textwrap
 from gettext import gettext as _
 
+from bs4 import BeautifulSoup
+from markdownify import MarkdownConverter
 from PyQt5.QtCore import QSize, Qt, pyqtSignal
 from PyQt5.QtGui import QFontDatabase, QPixmap
 from PyQt5.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QFrame,
-    QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
-    QSizePolicy, QTabWidget, QTextEdit, QVBoxLayout, QWidget, QProgressDialog
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QFormLayout,
+    QFrame,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QProgressDialog,
+    QPushButton,
+    QSizePolicy,
+    QTabWidget,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
 )
 
-from bs4 import BeautifulSoup
-from markdownify import MarkdownConverter
-from .export_settings_manager import ExportSettingsManager
-from .heading_formatter import HeadingFormat, HeadingFormatter
-from .heading_style_editor import HeadingStyleEditor
-from .export_pdf import PDFWorker
 from project_window.tree_manager import load_structure
 from settings.settings_manager import WWSettingsManager
 from settings.theme_manager import ThemeManager
+
+from .export_pdf import PDFWorker
+from .export_settings_manager import ExportSettingsManager
+from .heading_formatter import HeadingFormat, HeadingFormatter
+from .heading_style_editor import HeadingStyleEditor
+
 
 class ExportDialog(QDialog):
     """
@@ -108,7 +125,7 @@ class ExportDialog(QDialog):
         self.cover_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.cover_label.setAlignment(Qt.AlignCenter)
         self.cover_label.setStyleSheet("border: 1px solid #ccc; background: #f0f0f0;")
-        
+
         btn_h = QHBoxLayout()
         ch_btn = QPushButton(_("Change"))
         rm_btn = QPushButton(_("Remove"))
@@ -116,7 +133,7 @@ class ExportDialog(QDialog):
         rm_btn.clicked.connect(self._remove_cover)
         btn_h.addWidget(ch_btn)
         btn_h.addWidget(rm_btn)
-        
+
         cover_v.addWidget(self.cover_label, stretch=1)
         cover_v.addLayout(btn_h)
         form.addRow(cover_group)
@@ -136,19 +153,19 @@ class ExportDialog(QDialog):
         self.act_editor = HeadingStyleEditor(None, "Act", "Georgia", 24)
         self.chapter_editor = HeadingStyleEditor(None, "Chapter", "Georgia", 18)
         self.scene_editor = HeadingStyleEditor(None, "Scene", "Georgia", 14)
-        
+
         for editor in [self.act_editor, self.chapter_editor, self.scene_editor]:
             editor.previewUpdated.connect(self._update_heading_preview)
 
         self.use_acts_cb = QCheckBox(_("Use Act Headings"))
         self.use_chapters_cb = QCheckBox(_("Use Chapter Headings"))
         self.use_scenes_cb = QCheckBox(_("Use Scene Headings"))
-        
+
         self._build_level_tab(self.use_acts_cb, self.act_editor, _("Acts"))
         self._build_level_tab(self.use_chapters_cb, self.chapter_editor, _("Chapters"))
         self._build_level_tab(self.use_scenes_cb, self.scene_editor, _("Scenes"))
         self._setup_story_tab()
-        
+
         self.tabs.addTab(tab, _("Content"))
 
     def _build_level_tab(self, cb, ed, name):
@@ -165,12 +182,12 @@ class ExportDialog(QDialog):
         tab = QWidget()
         lay = QVBoxLayout(tab)
         lay.setSpacing(20)
-        
+
         # Font Styles
         group = QGroupBox(_("Paragraph Style"))
         form = QFormLayout(group)
         font_row_layout = QHBoxLayout()
-        
+
         self.body_font_combo = QComboBox()
         self.body_font_combo.addItems(["Georgia", "Times New Roman", "Arial", "Verdana"])
         self.body_font_combo.addItems(QFontDatabase().families())
@@ -178,10 +195,10 @@ class ExportDialog(QDialog):
         self.body_size_combo.addItems([str(i) for i in range(8, 30)])
         self.body_size_combo.setCurrentText("12")
         self.body_size_combo.setMinimumWidth(70)
-        
+
         self.body_font_combo.currentTextChanged.connect(self._update_heading_preview)
         self.body_size_combo.currentTextChanged.connect(self._update_heading_preview)
-        
+
         self.font_info_button = QPushButton()
         self.font_info_button.setFixedSize(24, 24)
         self.font_info_button.setIcon(ThemeManager.get_tinted_icon("assets/icons/info.svg"))
@@ -203,14 +220,14 @@ class ExportDialog(QDialog):
         self.start_ch_combo = QComboBox()
         self.end_act_combo = QComboBox()
         self.end_ch_combo = QComboBox()
-        
+
         act_names = [a.get("name", "Act") for a in self.acts]
         self.start_act_combo.addItems(act_names)
         self.end_act_combo.addItems(act_names)
-        
+
         self.start_act_combo.currentIndexChanged.connect(lambda i: self._update_chapter_list(i, self.start_ch_combo))
         self.end_act_combo.currentIndexChanged.connect(lambda i: self._update_chapter_list(i, self.end_ch_combo))
-        
+
         row1 = QHBoxLayout(); row1.addWidget(QLabel(_("From:"))); row1.addWidget(self.start_act_combo); row1.addWidget(self.start_ch_combo)
         row2 = QHBoxLayout(); row2.addWidget(QLabel(_("To:  "))); row2.addWidget(self.end_act_combo); row2.addWidget(self.end_ch_combo)
         r_lay.addLayout(row1); r_lay.addLayout(row2)
@@ -240,7 +257,7 @@ class ExportDialog(QDialog):
         self.include_toc_cb = QCheckBox(_("Generate Table of Contents (E-book/HTML/PDF only)"))
         self.ignore_acts_numbering_cb = QCheckBox(_("Ignore Acts when Numbering Chapters (Global Numbering)"))
 
-        for cb in [self.include_prompts_cb, self.include_summaries_cb, self.clean_quotes_cb, 
+        for cb in [self.include_prompts_cb, self.include_summaries_cb, self.clean_quotes_cb,
                    self.chapter_page_break_cb, self.include_toc_cb, self.ignore_acts_numbering_cb]:
             checkbox_layout.addWidget(cb)
 
@@ -314,8 +331,8 @@ class ExportDialog(QDialog):
             self._update_cover_display()
 
     def _change_cover(self):
-        p, _ = QFileDialog.getOpenFileName(self, _("Select Cover"), "", "Images (*.png *.jpg)")
-        if p: 
+        p, _unused = QFileDialog.getOpenFileName(self, _("Select Cover"), "", "Images (*.png *.jpg)")
+        if p:
             self.current_cover_path = p
             self._update_cover_display()
 
@@ -326,7 +343,7 @@ class ExportDialog(QDialog):
     def _browse_output(self):
         fmt = self.format_combo.currentText()
         ext = {"EPUB":".epub", "HTML":".html", "Markdown":".md", "PDF":".pdf", "Text":".txt"}[fmt]
-        p, _ = QFileDialog.getSaveFileName(self, _("Save"), self.project_name + ext, f"{fmt} (*{ext})")
+        p, _unused = QFileDialog.getSaveFileName(self, _("Save"), self.project_name + ext, f"{fmt} (*{ext})")
         if p: self.output_path_edit.setText(p)
 
     def _on_format_changed(self, fmt):
@@ -390,7 +407,7 @@ class ExportDialog(QDialog):
 
         s_act = settings.get("start_act_idx", 0)
         s_ch = settings.get("start_ch_idx", 0)
-        e_act = settings.get("end_act_idx", -1) 
+        e_act = settings.get("end_act_idx", -1)
         e_ch = settings.get("end_ch_idx", -1)
 
         if 0 <= s_act < self.start_act_combo.count():
@@ -460,39 +477,39 @@ class ExportDialog(QDialog):
             )
             if reply == QMessageBox.No:
                 return
-        
+
         fmt = self.format_combo.currentText()
         title = self.title_edit.text() or self.project_name
-        author = self.author_edit.text() or "Unknown"
+        author = self.author_edit.text() or _("Unknown")
 
         try:
-            if fmt == "PDF": 
+            if fmt == "PDF":
                 self._export_to_pdf(path, title, author)
                 return
             if fmt == "EPUB": self._export_to_epub(path, title, author)
             elif fmt == "HTML": self._export_to_html(path, title, author)
             elif fmt == "Markdown": self._export_to_markdown(path, title, author)
             elif fmt == "Text": self._export_to_text(path, title, author)
-            
+
             QMessageBox.information(self, _("Success"), _("Exported successfully to:\n{}").format(path))
             self.exportCompleted.emit(path)
             self.accept()
         except Exception as e:
-            QMessageBox.critical(self, _("Export Error"), str(e))
+            QMessageBox.critical(self, _("Export Failed"), str(e))
 
     def _export_to_pdf(self, path, title, author):
-        html = self._get_full_project_text("html")
+        html = self._get_full_project_text("pdf")
         font = self.body_font_combo.currentText()
         size = float(self.body_size_combo.currentText())
         toc = self.include_toc_cb.isChecked()
 
         self.pd = QProgressDialog(_("Rendering PDF..."), _("Cancel"), 0, 100, None)
-        
+
         self.worker = PDFWorker(path, html, title, author, font, size, toc)
         self.worker.progress.connect(self.pd.setValue)
         self.pd.canceled.connect(self._on_cancel)
         self.worker.finished.connect(self._on_pdf_finished)
-        
+
         self.hide()
         self.worker.start()
 
@@ -522,7 +539,7 @@ class ExportDialog(QDialog):
                f"<style>body{{font-family:serif; max-width:800px; margin:40px auto; line-height:1.6;}}" \
                f"h1{{text-align:center;}} hr{{margin:40px 0;}}</style></head>" \
                f"<body><h1>{title}</h1><p>By: {author}</p>{toc_html}{content}</body></html>"
-        
+
         with open(path, "w", encoding="utf-8") as f: f.write(full)
 
     def _export_to_markdown(self, path, title, author):
@@ -532,22 +549,36 @@ class ExportDialog(QDialog):
 
     def _export_to_text(self, path, title, author):
         text = self._get_full_project_text("text")
-        wrapped = self._wrap_text(f"{title}\nBy {author}\n\n{text}")
+        wrapped = self._wrap_text(f"{title}\n\nBy {author}\n\n{text}")
         with open(path, "w", encoding="utf-8") as f: f.write(wrapped)
 
     def _export_to_epub(self, path, title, author):
         try:
             from ebooklib import epub
             book = epub.EpubBook()
+            book.set_identifier(f"id_{self.project_name.replace(' ', '_')}")
             book.set_title(title)
             book.add_author(author)
-            
-            content = self._get_full_project_text("html")
+
+            if self.current_cover_path and os.path.exists(self.current_cover_path):
+                with open(self.current_cover_path, "rb") as f:
+                    data = f.read()
+                book.set_cover("cover.jpg", data)
+
+            content = self._get_full_project_text("epub")
+
+            epub_toc = []
+            for entry in self.toc_entries:
+                epub_toc.append(epub.Link("content.xhtml#"+entry["id"], entry["title"], entry["id"]))
+            book.toc = tuple(epub_toc)
+
             c1 = epub.EpubHtml(title=title, file_name='content.xhtml', content=f"<h1>{title}</h1>{content}")
             book.add_item(c1)
             book.spine = ['nav', c1]
+            book.add_item(epub.EpubNcx())
+            book.add_item(epub.EpubNav())
             epub.write_epub(path, book)
-        except: raise ImportError("ebooklib required for EPUB")
+        except: raise ImportError("ebooklib required for EPUB") from None
 
     def _get_full_project_text(self, format_type):
         """Build complete project text with proper format conversion."""
@@ -571,7 +602,6 @@ class ExportDialog(QDialog):
         # Build Body CSS
         body_font = self.body_font_combo.currentText()
         body_size = self.body_size_combo.currentText()
-        body_style = f"font-family: '{body_font}', serif; font-size: {body_size}pt; line-height: 1.6;"
 
         content_parts = []
         self.toc_entries = []
@@ -616,10 +646,10 @@ class ExportDialog(QDialog):
                     if ignore_acts:
                         toc_title = HeadingFormatter.format_heading(
                             self.chapter_editor.get_heading_format().template,
-                            toc_title, current_ch_num, 
+                            toc_title, current_ch_num,
                             self.chapter_editor.get_numbering_index()
                         )
-                    
+
                     self.toc_entries.append({"level": 2, "title": toc_title, "id": heading_id})
 
                 if include_summaries:
@@ -642,12 +672,10 @@ class ExportDialog(QDialog):
 
                     if format_type == "markdown":
                         scene_text = self._html_to_markdown(html_content)
-                    elif format_type in ("text", "pdf"):
+                    elif format_type in ("text"):
                         scene_text = self._wrap_text(self._html_to_plain_text(html_content))
-                    else:  # html/epub
+                    else:  # html/epub/pdf
                         scene_text = self._html_to_fragment(html_content, body_font, body_size)
-                        # Wrap in a div with the chosen paragraph style
-                        # content_parts.append(f'<div style="{body_style}">{scene_text}</div>')
 
                     if self.clean_quotes_cb.isChecked():
                         scene_text = self._normalize_typography(scene_text)
@@ -682,7 +710,7 @@ class ExportDialog(QDialog):
         else:  # Scene
             tag = "h3"
 
-        if format_type in ("html", "epub"):
+        if format_type in ("html", "epub", "pdf"):
             style = self._build_css_style(fmt)
             id_attr = f' id="{anchor_id}"' if anchor_id else ""
             # Add specific logic for Chapter Page Breaks
@@ -705,10 +733,6 @@ class ExportDialog(QDialog):
             if fmt.italic:
                 md_text = f"*{md_text}*"
             return f"{prefix} {md_text}"
-
-        elif format_type == "pdf":
-            # For PDF we return tagged text so the PDF renderer can parse it
-            return f"<{tag}>{heading_text}</{tag}>"
 
         return heading_text
 
@@ -741,79 +765,81 @@ class ExportDialog(QDialog):
             # Remove Qt meta/style tags
             for tag in body.find_all(['style', 'meta']):
                 tag.decompose()
-
             content = body
         else:
             content = soup
 
-
-        default_families = ["arial", "helvetica neue", "verdana"]
-        default_size = "12pt"
         p_style = f"font-family: '{base_font}'; font-size: {base_size}pt; line-height: 1.5;"
 
+        # Helper to parse style strings into dicts
+        def parse_styles(style_str):
+            d = {}
+            for part in style_str.lower().split(';'):
+                if ':' in part:
+                    k, v = part.split(':', 1)
+                    d[k.strip()] = v.strip()
+            return d
 
         # === Clean up Qt empty paragraphs ===
-        for tag in content.find_all(True):
-            if tag.name == 'p':
-                style = tag.get('style', '')
+        for p in content.find_all('p'):
+            style = p.get('style', '')
 
-                # Remove Qt empty paragraph spacers
-                if '-qt-paragraph-type:empty' in style:
-                    tag.decompose()          # Completely remove these empty spacers
-                    continue
-                # tag.attrs.pop('style', None)
-                tag['style'] = p_style
+            # Remove Qt empty paragraph spacers
+            if '-qt-paragraph-type:empty' in style:
+                p.decompose()          # Completely remove these empty spacers
+                continue
+            p['style'] = p_style
 
+            # Identify if the paragraph starts with a span and get its font overrides
+            # We look for the first child that isn't just whitespace
+            first_child = next((c for c in p.children if str(c).strip()), None)
 
-            if tag.name == 'span':
-                style_str = tag.get('style', '')
-                if not style_str:
-                    continue
+            target_font = None
+            target_size = None
 
-                # Parse the inline style string into a dictionary
-                styles = {}
-                for part in style_str.split(';'):
-                    if ':' in part:
-                        k, v = part.split(':', 1)
-                        styles[k.strip().lower()] = v.strip().lower()
+            if first_child and first_child.name == 'span':
+                first_styles = parse_styles(first_child.get('style', ''))
+                target_font = first_styles.get('font-family')
+                target_size = first_styles.get('font-size')
 
-                new_styles = []
+            # If we found target values to strip, process all spans in this paragraph
+            if target_font or target_size:
+                for span in p.find_all('span'):
+                    s_styles = parse_styles(span.get('style', ''))
 
-                # Check Font Family:
-                # Keep it ONLY if it's NOT one of the common defaults (meaning a user override)
-                family_val = styles.get('font-family', '')
-                if family_val:
-                    # 1. Split by comma, 2. Strip quotes and whitespace from each item
-                    fonts = [f.strip().strip("'").strip('"').lower() for f in family_val.split(',')]
+                    # Remove the property if it matches the "paragraph-wide" override
+                    if target_font and s_styles.get('font-family') == target_font:
+                        s_styles.pop('font-family')
+                    if target_size and s_styles.get('font-size') == target_size:
+                        s_styles.pop('font-size')
 
-                    # 3. Check the primary (first) font in the list
-                    primary_font = fonts[0] if fonts else ""
+                    # Rebuild the style string
+                    if s_styles:
+                        new_style_str = "; ".join([f"{k}: {v}" for k, v in s_styles.items()])
+                        span['style'] = new_style_str
+                    else:
+                        # If no styles left (e.g. it was just the font/size), unwrap it
+                        span.unwrap()
 
-                    # If the primary font is NOT a standard default, it's a user choice (like 'arial black')
-                    if primary_font and primary_font not in default_families:
-                        orig_family = styles['font-family']
-                        # Ensure font name is quoted if it has spaces
-                        if ' ' in orig_family and not (orig_family.startswith("'") or orig_family.startswith('"')):
-                            orig_family = f"'{orig_family}'"
-                        new_styles.append(f"font-family: {orig_family}")
+            # Secondary cleanup for any remaining spans (e.g. ones that didn't match the first span
+            # but still use default Arial/12pt that we want to strip)
+            for span in p.find_all('span'):
+                s_styles = parse_styles(span.get('style', ''))
+                changed = False
 
-                # Check Font Size:
-                # Keep it ONLY if it differs from the default 12pt
-                size = styles.get('font-size', '')
-                if size and size != default_size:
-                    new_styles.append(f"font-size: {styles['font-size']}")
+                # Cleanup standard defaults that might have survived
+                if s_styles.get('font-family') in ["arial", "helvetica neue", "verdana"]:
+                    s_styles.pop('font-family')
+                    changed = True
+                if s_styles.get('font-size') == "12pt":
+                    s_styles.pop('font-size')
+                    changed = True
 
-                # Always keep these "Highlights"
-                for key in ['font-style', 'font-weight', 'text-decoration', 'color', 'background-color']:
-                    if key in styles:
-                        new_styles.append(f"{key}: {styles[key]}")
-
-                if new_styles:
-                    tag['style'] = "; ".join(new_styles)
-                else:
-                    # If the span now has no meaningful styles, remove the tag but keep the text
-                    tag.unwrap()
-
+                if changed:
+                    if s_styles:
+                        span['style'] = "; ".join([f"{k}: {v}" for k, v in s_styles.items()])
+                    else:
+                        span.unwrap()
 
         # Return cleaned inner HTML
         return ''.join(str(child) for child in content.children).strip()
@@ -901,13 +927,6 @@ class ExportDialog(QDialog):
             paragraphs = [line.strip() for line in text.split('\n') if line.strip()]
         return "\n\n".join(paragraphs)
 
-    def _clean_html_fragment(self, html):
-        soup = BeautifulSoup(html, "html.parser")
-        for tag in soup.find_all(True):
-            if tag.name == 'p' and '-qt-paragraph-type:empty' in tag.get('style', ''):
-                tag.decompose()
-        return str(soup)
-
     def _normalize_typography(self, t):
         d = {'“':'"', '”':'"', '‘':"'", '’':"'", '—':'-', '–':'-', '…':'...'}
         for o, n in d.items(): t = t.replace(o, n)
@@ -942,6 +961,42 @@ class ExportDialog(QDialog):
                 cleaned.append(line)
 
         return '\n'.join(cleaned).strip()
+
+    def _fallback_content_extraction(self, format_type: str) -> str:
+        """Fallback when ProjectModel is not available - with proper numbering."""
+        content_parts = []
+
+        use_acts = self.use_acts_cb.isChecked()
+        use_chapters = self.use_chapters_cb.isChecked()
+        use_scenes = self.use_scenes_cb.isChecked()
+
+        for act_idx, act in enumerate(self.acts, 1):
+            if use_acts:
+                heading = self._apply_heading_format(
+                    act, act_idx, self.act_editor, format_type
+                )
+                content_parts.append(heading)
+
+            # Need Act summaries here and for chapters below
+
+            for ch_idx, chapter in enumerate(act.get("chapters", []), 1):
+                if use_chapters:
+                    heading = self._apply_heading_format(
+                        chapter, ch_idx, self.chapter_editor, format_type
+                    )
+                    content_parts.append(heading)
+
+                for sc_idx, scene in enumerate(chapter.get("scenes", []), 1):
+                    if use_scenes:
+                        heading = self._apply_heading_format(
+                            scene, sc_idx, self.scene_editor, format_type
+                        )
+                        content_parts.append(heading)
+
+                    content = scene.get("content", "")
+                    content_parts.append(content)
+
+        return "\n\n".join(content_parts)
 
 # Markdown specific functions
 class MDConverter(MarkdownConverter):

@@ -1,9 +1,9 @@
-import os
-import traceback, sys
-import platform
 import logging
-from typing import Callable
+import os
+import platform
+from _collections_abc import Callable
 from dataclasses import dataclass
+
 import pymupdf
 from bs4 import BeautifulSoup
 from bs4.element import NavigableString
@@ -86,15 +86,15 @@ class FontManager:
             filename = os.path.basename(path).lower()
             if not all(token in filename for token in family_tokens):
                 continue
-            
+
             remainder = filename
-            
+
             has_bold = any(s in remainder for s in ["bold", "-b", "_b", ".b", "bd"])
             has_italic = any(s in remainder for s in ["italic", "oblique", "-i", "_i", ".i", "it"])
-            
+
             if bold == has_bold and italic == has_italic:
                 for t in family_tokens: remainder = remainder.replace(t, "", 1)
-            
+
             for style_marker in ["bold", "italic", "oblique", "bd", "it", "-", "_", " "]:
                 remainder = remainder.replace(style_marker, "")
 
@@ -129,16 +129,16 @@ class RichTextRenderer:
         self.x = self.margin
         return self.current_page
 
-    def render_html(self, html: str, default_font: str, default_size: float, 
+    def render_html(self, html: str, default_font: str, default_size: float,
                     progress_cb: Callable[[int], None],
                     check_cancel: Callable[[], bool]):
         if not self.current_page: self._new_page()
         soup = BeautifulSoup(html, "html.parser")
-        
+
         # Identify top-level block elements for progress granular tracking
         nodes = soup.find_all(recursive=False) or [soup]
         total = len(nodes)
-        
+
         for i, node in enumerate(nodes):
             if check_cancel and check_cancel():
                 return False
@@ -158,7 +158,7 @@ class RichTextRenderer:
             if self.x != self.margin:
                 self._force_newline(new_style.font_size)
             self.y += new_style.font_size * 0.2
-            
+
             if node.name == 'hr':
                 self._draw_hr()
                 return
@@ -177,10 +177,10 @@ class RichTextRenderer:
     def _derive_style(self, node, base: TextStyle) -> TextStyle:
         if isinstance(node, NavigableString): return base
         raw_style = node.get('style', '').lower().replace(" ", "")
-        
+
         is_bold = base.bold or node.name in ['b', 'strong', 'h1', 'h2', 'h3'] or "font-weight:bold" in raw_style
         is_italic = base.italic or node.name in ['i', 'em'] or "font-style:italic" in raw_style
-        
+
         family = base.font_family
         if "font-family:" in raw_style:
             try:
@@ -230,8 +230,8 @@ class RichTextRenderer:
 
         if font_id not in self._fonts_on_page:
             self.current_page.insert_font(
-                fontname=font_id, 
-                fontbuffer=font_obj.buffer, 
+                fontname=font_id,
+                fontbuffer=font_obj.buffer,
                 set_simple=False
             )
             self._fonts_on_page.add(font_id)
@@ -329,10 +329,10 @@ class PDFWorker(QThread):
                 <hr/>
                 <br/>
             """
-            
-            renderer.render_html(header + self.html, self.font_family, self.font_size, 
+
+            renderer.render_html(header + self.html, self.font_family, self.font_size,
                                  self.progress.emit, lambda: self._is_cancelled)
-            
+
             if self._is_cancelled:
                 self.finished.emit(False, "Cancelled by user")
                 return
