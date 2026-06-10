@@ -28,6 +28,7 @@ from project_window.project_window import ProjectWindow
 from settings.settings_dialog import SettingsDialog
 from settings.settings_manager import WWSettingsManager
 from settings.theme_manager import ThemeManager
+import exporter
 
 # Define the file used for storing project data.
 PROJECTS_FILE = "projects.json"
@@ -150,10 +151,11 @@ class ProjectPostIt(QToolButton):
                     QMessageBox.warning(
                         self, _("Delete Project Error"), _("Error deleting project: {}").format(str(e)))
         elif action == export_action:
-            QMessageBox.information(
-                self, _("Export Project"),
-                _("Export '{}' functionality will be implemented later.").format(self.project['name'])
-            )
+            project_name = self.project['name']
+            cover = self.project.get("cover")
+            from project_window.project_model import ProjectModel
+            model = ProjectModel(project_name)
+            exporter.show_export_dialog(self, project_name, model, cover_path=cover)
         elif action == stats_action:
             try:
                 from util.statistics import show_statistics
@@ -217,7 +219,7 @@ class ProjectPostIt(QToolButton):
         )
         destination_path = WWSettingsManager.get_project_path(self.project["name"])
         os.makedirs(destination_path, exist_ok=True)
-        if file_path and os.path.dirname(file_path) != destination_path:
+        if file_path and os.path.dirname(file_path) != destination_path[:-1]:
             file_path = os.path.relpath(shutil.copy2(file_path, destination_path))
         if file_path:
             self.project["cover"] = file_path
