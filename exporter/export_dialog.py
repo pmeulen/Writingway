@@ -1,47 +1,29 @@
 # ruff: noqa: RUF001
 import os
-import platform
 import textwrap
-from dataclasses import dataclass
 from gettext import gettext as _
 
-import pymupdf
-from bs4 import BeautifulSoup
-from bs4.element import NavigableString
-from markdownify import MarkdownConverter
 from PyQt5.QtCore import QSize, Qt, pyqtSignal
 from PyQt5.QtGui import QFontDatabase, QPixmap
 from PyQt5.QtWidgets import (
-    QCheckBox,
-    QComboBox,
-    QDialog,
-    QFileDialog,
-    QFormLayout,
-    QFrame,
-    QGroupBox,
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
-    QMessageBox,
-    QPushButton,
-    QSizePolicy,
-    QTabWidget,
-    QTextEdit,
-    QVBoxLayout,
-    QWidget,
+    QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QFrame,
+    QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
+    QSizePolicy, QTabWidget, QTextEdit, QVBoxLayout, QWidget, QProgressDialog
 )
 
-from exporter.export_settings_manager import ExportSettingsManager
-from exporter.heading_formatter import HeadingFormat, HeadingFormatter
-from exporter.heading_style_editor import HeadingStyleEditor
+from bs4 import BeautifulSoup
+from markdownify import MarkdownConverter
+from .export_settings_manager import ExportSettingsManager
+from .heading_formatter import HeadingFormat, HeadingFormatter
+from .heading_style_editor import HeadingStyleEditor
+from .export_pdf import PDFWorker
 from project_window.tree_manager import load_structure
 from settings.settings_manager import WWSettingsManager
 from settings.theme_manager import ThemeManager
 
-
 class ExportDialog(QDialog):
     """
-    Reusable modal dialog for exporting projects with persistent settings.
+    Refactored Export Dialog with threaded PDF generation and standardized numbering.
     """
     exportCompleted = pyqtSignal(str)
 
@@ -53,272 +35,195 @@ class ExportDialog(QDialog):
         self.acts = self.project_structure.get("acts", [])
         self.current_cover_path = cover_path
         self.settings_manager = ExportSettingsManager(project_name)
+        self.toc_entries = []
 
         self.setWindowTitle(_("Export Project"))
         self.resize(920, 800)
         self.setModal(True)
 
-        self.setup_ui()
-        self.load_settings()
-        self.apply_theme()
+        self._setup_ui()
+        self._load_settings()
+        self._apply_theme()
 
-    def setup_ui(self):
+    def _setup_ui(self):
         main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(12)
-
-        # Tabs
         self.tabs = QTabWidget()
         self.tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         main_layout.addWidget(self.tabs, stretch=1)
 
-        self.setup_metadata_tab()
-        self.setup_content_tab()
-        self.setup_advanced_tab()
+        self._setup_metadata_tab()
+        self._setup_content_tab()
+        self._setup_advanced_tab()
 
-        # Separator
         separator = QFrame()
         separator.setFrameShape(QFrame.HLine)
         separator.setFrameShadow(QFrame.Sunken)
         main_layout.addWidget(separator)
 
-        # Output Options - Two rows
+        # Output Form
         output_form = QFormLayout()
         output_form.setLabelAlignment(Qt.AlignRight)
 
         self.format_combo = QComboBox()
         self.format_combo.addItems(["EPUB", "HTML", "Markdown", "PDF", "Text"])
-        self.format_combo.currentTextChanged.connect(self.on_format_changed)
+        self.format_combo.currentTextChanged.connect(self._on_format_changed)
         output_form.addRow(_("Output Format:"), self.format_combo)
 
-        output_file_layout = QHBoxLayout()
+        path_layout = QHBoxLayout()
         self.output_path_edit = QLineEdit()
         self.output_path_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        browse_btn = QPushButton(_("Browse..."))
-        browse_btn.clicked.connect(self.browse_output)
-        output_file_layout.addWidget(self.output_path_edit)
-        output_file_layout.addWidget(browse_btn)
-        output_form.addRow(_("Output File:"), output_file_layout)
-        output_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
 
+        browse_btn = QPushButton(_("Browse..."))
+        browse_btn.clicked.connect(self._browse_output)
+        path_layout.addWidget(self.output_path_edit)
+        path_layout.addWidget(browse_btn)
+        output_form.addRow(_("Output File:"), path_layout)
+        output_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         main_layout.addLayout(output_form)
 
-        # Bottom buttons
+        # Buttons
         btn_layout = QHBoxLayout()
         self.export_btn = QPushButton(_("Export"))
         self.cancel_btn = QPushButton(_("Cancel"))
-        self.export_btn.clicked.connect(self.perform_export)
+        self.export_btn.clicked.connect(self._perform_export)
         self.cancel_btn.clicked.connect(self.reject)
         btn_layout.addStretch()
         btn_layout.addWidget(self.cancel_btn)
         btn_layout.addWidget(self.export_btn)
         main_layout.addLayout(btn_layout)
 
-    def setup_metadata_tab(self):
+    def _setup_metadata_tab(self):
         tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setSpacing(10)
-
-        form = QFormLayout()
-        form.setLabelAlignment(Qt.AlignRight)
-
+        form = QFormLayout(tab)
         self.title_edit = QLineEdit()
-        form.addRow(_("Book Title:"), self.title_edit)
-
         self.author_edit = QLineEdit()
+        form.addRow(_("Book Title:"), self.title_edit)
         form.addRow(_("Author:"), self.author_edit)
+        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
 
         cover_group = QGroupBox()
         cover_v = QVBoxLayout(cover_group)
-        cover_v.setSpacing(8)
-        self.cover_label = QLabel()
+        self.cover_label = QLabel(_("No Cover Selected"))
         self.cover_label.setMinimumSize(200, 260)
         self.cover_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.cover_label.setAlignment(Qt.AlignCenter)
-        self.cover_label.setStyleSheet("border: 1px solid #ccc; background: #f8f8f8;")
-        self.update_cover_display()
-
-        cover_btns = QHBoxLayout()
-        self.change_cover_btn = QPushButton(_("Change Cover"))
-        self.remove_cover_btn = QPushButton(_("Remove Cover"))
-        self.change_cover_btn.clicked.connect(self.change_cover)
-        self.remove_cover_btn.clicked.connect(self.remove_cover)
-        cover_btns.addWidget(self.change_cover_btn)
-        cover_btns.addWidget(self.remove_cover_btn)
-
+        self.cover_label.setStyleSheet("border: 1px solid #ccc; background: #f0f0f0;")
+        
+        btn_h = QHBoxLayout()
+        ch_btn = QPushButton(_("Change"))
+        rm_btn = QPushButton(_("Remove"))
+        ch_btn.clicked.connect(self._change_cover)
+        rm_btn.clicked.connect(self._remove_cover)
+        btn_h.addWidget(ch_btn)
+        btn_h.addWidget(rm_btn)
+        
         cover_v.addWidget(self.cover_label, stretch=1)
-        cover_v.addLayout(cover_btns)
-        form.addWidget(cover_group)
-        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
-
-        layout.addLayout(form)
+        cover_v.addLayout(btn_h)
+        form.addRow(cover_group)
         self.tabs.addTab(tab, _("Metadata"))
 
-    def setup_content_tab(self):
+    def _setup_content_tab(self):
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        layout.setSpacing(12)
-
         self.heading_preview = QTextEdit()
         self.heading_preview.setReadOnly(True)
-        self.heading_preview.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.heading_preview.setMinimumHeight(200)
         layout.addWidget(self.heading_preview, stretch=1)
 
         self.level_tabs = QTabWidget()
         layout.addWidget(self.level_tabs)
 
-        self.setup_act_tab()
-        self.setup_chapter_tab()
-        self.setup_scene_tab()
-        self.setup_story_tab()
+        self.act_editor = HeadingStyleEditor(None, "Act", "Georgia", 24)
+        self.chapter_editor = HeadingStyleEditor(None, "Chapter", "Georgia", 18)
+        self.scene_editor = HeadingStyleEditor(None, "Scene", "Georgia", 14)
+        
+        for editor in [self.act_editor, self.chapter_editor, self.scene_editor]:
+            editor.previewUpdated.connect(self._update_heading_preview)
 
-        layout.addStretch()
+        self.use_acts_cb = QCheckBox(_("Use Act Headings"))
+        self.use_chapters_cb = QCheckBox(_("Use Chapter Headings"))
+        self.use_scenes_cb = QCheckBox(_("Use Scene Headings"))
+        
+        self._build_level_tab(self.use_acts_cb, self.act_editor, _("Acts"))
+        self._build_level_tab(self.use_chapters_cb, self.chapter_editor, _("Chapters"))
+        self._build_level_tab(self.use_scenes_cb, self.scene_editor, _("Scenes"))
+        self._setup_story_tab()
+        
         self.tabs.addTab(tab, _("Content"))
 
-    def setup_act_tab(self):
-        self.use_acts_cb = QCheckBox(_("Use Act Headings"))
-        self.use_acts_cb.setChecked(True)
-        self.use_acts_cb.stateChanged.connect(self.on_use_changed)
+    def _build_level_tab(self, cb, ed, name):
+        w = QWidget()
+        v = QVBoxLayout(w)
+        cb.setChecked(True)
+        cb.stateChanged.connect(lambda: ed.setEnabled(cb.isChecked()))
+        cb.stateChanged.connect(self._update_heading_preview)
+        v.addWidget(cb)
+        v.addWidget(ed)
+        self.level_tabs.addTab(w, name)
 
-        self.act_editor = HeadingStyleEditor(None, "Act", default_font="Georgia", default_size=24)
-        self.act_editor.previewUpdated.connect(self.update_heading_preview)
-        self._build_level_tab(self.use_acts_cb, self.act_editor, _("Acts"))
-
-    def setup_chapter_tab(self):
-        self.use_chapters_cb = QCheckBox(_("Use Chapter Headings"))
-        self.use_chapters_cb.setChecked(True)
-        self.use_chapters_cb.stateChanged.connect(self.on_use_changed)
-
-        self.chapter_editor = HeadingStyleEditor(None, "Chapter", default_font="Georgia", default_size=18)
-        self.chapter_editor.previewUpdated.connect(self.update_heading_preview)
-        self._build_level_tab(self.use_chapters_cb, self.chapter_editor, _("Chapters"))
-
-    def setup_scene_tab(self):
-        self.use_scenes_cb = QCheckBox(_("Use Scene Headings"))
-        self.use_scenes_cb.setChecked(True)
-        self.use_scenes_cb.stateChanged.connect(self.on_use_changed)
-
-        self.scene_editor = HeadingStyleEditor(None, "Scene", default_font="Georgia", default_size=14)
-        self.scene_editor.previewUpdated.connect(self.update_heading_preview)
-        self._build_level_tab(self.use_scenes_cb, self.scene_editor, _("Scenes"))
-
-
-    def _build_level_tab(self, checkbox: QCheckBox, editor: HeadingStyleEditor, tab_name: str):
-        container = QWidget()
-        vlay = QVBoxLayout(container)
-        vlay.setSpacing(8)
-        vlay.addWidget(checkbox)
-        vlay.addWidget(editor)
-        self.level_tabs.addTab(container, tab_name)
-
-    def setup_story_tab(self):
-        """Tab for paragraph styling and export range."""
+    def _setup_story_tab(self):
         tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setSpacing(20)
-
-        # 1. Paragraph Styling Group
-        style_group = QGroupBox(_("Paragraph Styling"))
-        style_form = QFormLayout(style_group)
+        lay = QVBoxLayout(tab)
+        lay.setSpacing(20)
+        
+        # Font Styles
+        group = QGroupBox(_("Paragraph Style"))
+        form = QFormLayout(group)
         font_row_layout = QHBoxLayout()
-
+        
         self.body_font_combo = QComboBox()
-        # Populate with common serif/sans fonts and system fonts
-        standard_fonts = ["Georgia", "Times New Roman", "Arial", "Verdana", "Courier New"]
-        system_fonts = QFontDatabase().families()
-        self.body_font_combo.addItems(standard_fonts)
-        self.body_font_combo.insertSeparator(len(standard_fonts))
-        self.body_font_combo.addItems(system_fonts)
-        self.body_font_combo.currentTextChanged.connect(self.update_heading_preview)
-
-
+        self.body_font_combo.addItems(["Georgia", "Times New Roman", "Arial", "Verdana"])
+        self.body_font_combo.addItems(QFontDatabase().families())
         self.body_size_combo = QComboBox()
-        self.body_size_combo.addItems([str(i) for i in range(8, 26)])
+        self.body_size_combo.addItems([str(i) for i in range(8, 30)])
         self.body_size_combo.setCurrentText("12")
-        self.body_size_combo.currentTextChanged.connect(self.update_heading_preview)
-
+        self.body_size_combo.setMinimumWidth(70)
+        
+        self.body_font_combo.currentTextChanged.connect(self._update_heading_preview)
+        self.body_size_combo.currentTextChanged.connect(self._update_heading_preview)
+        
         self.font_info_button = QPushButton()
         self.font_info_button.setFixedSize(24, 24)
         self.font_info_button.setIcon(ThemeManager.get_tinted_icon("assets/icons/info.svg"))
         self.font_info_button.setToolTip(_("Font Exceptions"))
         self.font_info_button.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
-        self.font_info_button.clicked.connect(self.show_font_exceptions)
+        self.font_info_button.clicked.connect(self._show_font_exceptions)
 
         font_row_layout.addWidget(self.body_font_combo, 1) # '1' makes the combo stretch
         font_row_layout.addWidget(self.font_info_button)
 
-        style_form.addRow(_("Font Family:"), font_row_layout)
-        style_form.addRow(_("Font Size (pt):"), self.body_size_combo)
-        self.body_size_combo.setMinimumWidth(70)
-        layout.addWidget(style_group)
+        form.addRow(_("Font Family:"), font_row_layout)
+        form.addRow(_("Font Size:"), self.body_size_combo)
+        lay.addWidget(group)
 
-        # 2. Export Range Group
-        range_group = QGroupBox(_("Export Range"))
-        range_layout = QVBoxLayout(range_group)
-
-        # Start Row
-        start_lay = QHBoxLayout()
+        # Range
+        r_group = QGroupBox(_("Export Range"))
+        r_lay = QVBoxLayout(r_group)
         self.start_act_combo = QComboBox()
         self.start_ch_combo = QComboBox()
-        start_lay.addWidget(QLabel(_("Start:")))
-        start_lay.addWidget(QLabel(_("Act")))
-        start_lay.addWidget(self.start_act_combo, 1)
-        start_lay.addWidget(QLabel(_("Chapter")))
-        start_lay.addWidget(self.start_ch_combo, 1)
-        range_layout.addLayout(start_lay)
-
-        # End Row
-        end_lay = QHBoxLayout()
         self.end_act_combo = QComboBox()
         self.end_ch_combo = QComboBox()
-        end_lay.addWidget(QLabel(_("End:  ")))
-        end_lay.addWidget(QLabel(_("Act")))
-        end_lay.addWidget(self.end_act_combo, 1)
-        end_lay.addWidget(QLabel(_("Chapter")))
-        end_lay.addWidget(self.end_ch_combo, 1)
-        range_layout.addLayout(end_lay)
-
-        layout.addWidget(range_group)
-        layout.addStretch()
-
-        # Populate Range Combos
-        act_names = [a.get("name", _("Untitled Act")) for a in self.acts]
+        
+        act_names = [a.get("name", "Act") for a in self.acts]
         self.start_act_combo.addItems(act_names)
         self.end_act_combo.addItems(act_names)
-
-        # Connect signals
-        self.start_act_combo.currentIndexChanged.connect(
-            lambda idx: self._update_chapter_list(idx, self.start_ch_combo)
-        )
-        self.end_act_combo.currentIndexChanged.connect(
-            lambda idx: self._update_chapter_list(idx, self.end_ch_combo)
-        )
-
-        # Initial populations
-        if self.acts:
-            self._update_chapter_list(0, self.start_ch_combo)
-            self.end_act_combo.setCurrentIndex(len(self.acts) - 1)
-            self._update_chapter_list(len(self.acts) - 1, self.end_ch_combo)
-            self.end_ch_combo.setCurrentIndex(self.end_ch_combo.count() - 1)
+        
+        self.start_act_combo.currentIndexChanged.connect(lambda i: self._update_chapter_list(i, self.start_ch_combo))
+        self.end_act_combo.currentIndexChanged.connect(lambda i: self._update_chapter_list(i, self.end_ch_combo))
+        
+        row1 = QHBoxLayout(); row1.addWidget(QLabel(_("From:"))); row1.addWidget(self.start_act_combo); row1.addWidget(self.start_ch_combo)
+        row2 = QHBoxLayout(); row2.addWidget(QLabel(_("To:  "))); row2.addWidget(self.end_act_combo); row2.addWidget(self.end_ch_combo)
+        r_lay.addLayout(row1); r_lay.addLayout(row2)
+        lay.addWidget(r_group)
 
         self.level_tabs.addTab(tab, _("Story"))
+        if self.acts:
+            self._update_chapter_list(0, self.start_ch_combo)
+            self._update_chapter_list(0, self.end_ch_combo)
+            self.end_act_combo.setCurrentIndex(len(self.acts) - 1)
+            self.end_ch_combo.setCurrentIndex(self.end_ch_combo.count() - 1)
 
-    def _update_chapter_list(self, act_idx: int, chapter_combo: QComboBox):
-        """Populates the chapter combo based on the selected act index."""
-        chapter_combo.clear()
-        if 0 <= act_idx < len(self.acts):
-            chapters = self.acts[act_idx].get("chapters", [])
-            ch_names = [c.get("name", _("Untitled Chapter")) for c in chapters]
-            chapter_combo.addItems(ch_names)
-
-    def on_use_changed(self):
-        # Enable/disable editors
-        self.act_editor.setEnabled(self.use_acts_cb.isChecked())
-        self.chapter_editor.setEnabled(self.use_chapters_cb.isChecked())
-        self.scene_editor.setEnabled(self.use_scenes_cb.isChecked())
-        self.update_heading_preview()
-
-    def setup_advanced_tab(self):
+    def _setup_advanced_tab(self):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setSpacing(12)
@@ -335,19 +240,20 @@ class ExportDialog(QDialog):
         self.include_toc_cb = QCheckBox(_("Generate Table of Contents (E-book/HTML/PDF only)"))
         self.ignore_acts_numbering_cb = QCheckBox(_("Ignore Acts when Numbering Chapters (Global Numbering)"))
 
-        checkbox_layout.addWidget(self.include_prompts_cb)
-        checkbox_layout.addWidget(self.include_summaries_cb)
-        checkbox_layout.addWidget(self.clean_quotes_cb)
-        checkbox_layout.addWidget(self.chapter_page_break_cb)
-        checkbox_layout.addWidget(self.include_toc_cb)
-        checkbox_layout.addWidget(self.ignore_acts_numbering_cb)
+        for cb in [self.include_prompts_cb, self.include_summaries_cb, self.clean_quotes_cb, 
+                   self.chapter_page_break_cb, self.include_toc_cb, self.ignore_acts_numbering_cb]:
+            checkbox_layout.addWidget(cb)
 
         layout.addLayout(checkbox_layout)
         layout.addStretch()
-        layout.addWidget(QLabel(_("Additional metadata and options will be added here.")))
         self.tabs.addTab(tab, _("Advanced"))
 
-    def update_heading_preview(self):
+    def _update_chapter_list(self, idx, combo):
+        combo.clear()
+        if 0 <= idx < len(self.acts):
+            combo.addItems([c.get("name", "Chapter") for c in self.acts[idx].get("chapters", [])])
+
+    def _update_heading_preview(self):
         use_acts = self.use_acts_cb.isChecked()
         use_chapters = self.use_chapters_cb.isChecked()
         use_scenes = self.use_scenes_cb.isChecked()
@@ -386,62 +292,50 @@ class ExportDialog(QDialog):
 
         self.heading_preview.setHtml(preview_html)
 
-    def apply_theme(self):
+    def _apply_theme(self):
         theme = WWSettingsManager.get_appearance_settings().get("theme", "Notion Light")
         self.setStyleSheet(ThemeManager.get_stylesheet(theme))
+        self._update_cover_display()
 
-    def update_cover_display(self):
+    def _update_cover_display(self):
         if self.current_cover_path and os.path.exists(self.current_cover_path):
-            pixmap = QPixmap(self.current_cover_path)
             label_size = self.cover_label.size()
             if label_size.width() < 50 or label_size.height() < 50:
                 label_size = QSize(240, 340)  # fallback
-
-            scaled = pixmap.scaled(label_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            self.cover_label.setPixmap(scaled)
+            pix = QPixmap(self.current_cover_path).scaled(label_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.cover_label.setPixmap(pix)
         else:
-            self.cover_label.setText(_("No Cover Selected"))
-            self.cover_label.setPixmap(QPixmap())
+            self.cover_label.setText(_("No Cover"))
 
     def resizeEvent(self, event) -> None: # type: ignore[override]
         """Re-scale cover image when dialog or tab resizes"""
         super().resizeEvent(event)
         if hasattr(self, 'cover_label') and self.current_cover_path:
-            self.update_cover_display()
+            self._update_cover_display()
 
-    def change_cover(self):
-        file_path, _unused = QFileDialog.getOpenFileName(
-            self, _("Select Book Cover"), "", _("Images (*.png *.jpg *.jpeg *.bmp)")
-        )
-        if file_path:
-            self.current_cover_path = file_path
-            self.update_cover_display()
+    def _change_cover(self):
+        p, _ = QFileDialog.getOpenFileName(self, _("Select Cover"), "", "Images (*.png *.jpg)")
+        if p: 
+            self.current_cover_path = p
+            self._update_cover_display()
 
-    def remove_cover(self):
+    def _remove_cover(self):
         self.current_cover_path = None
-        self.update_cover_display()
+        self._update_cover_display()
 
-    def browse_output(self):
+    def _browse_output(self):
         fmt = self.format_combo.currentText()
-        ext_map = {"EPUB": ".epub", "HTML": ".html", "Markdown": ".md", "PDF": ".pdf", "Text": ".txt"}
-        default_name = f"{self.title_edit.text() or self.project_name}{ext_map.get(fmt, '.epub')}"
-        path, _unused = QFileDialog.getSaveFileName(self, _("Save As"), default_name,
-                                              f"{fmt} (*{ext_map.get(fmt, '.epub')})")
-        if path:
-            self.output_path_edit.setText(path)
+        ext = {"EPUB":".epub", "HTML":".html", "Markdown":".md", "PDF":".pdf", "Text":".txt"}[fmt]
+        p, _ = QFileDialog.getSaveFileName(self, _("Save"), self.project_name + ext, f"{fmt} (*{ext})")
+        if p: self.output_path_edit.setText(p)
 
-    def on_format_changed(self, fmt: str):
-        current = self.output_path_edit.text()
-        if current:
-            base = os.path.splitext(current)[0]
-            ext_map = {"EPUB": ".epub", "HTML": ".html", "Markdown": ".md", "PDF": ".pdf", "Text": ".txt"}
-            self.output_path_edit.setText(base + ext_map.get(fmt, ".epub"))
+    def _on_format_changed(self, fmt):
+        curr = self.output_path_edit.text()
+        if curr:
+            ext = {"EPUB":".epub", "HTML":".html", "Markdown":".md", "PDF":".pdf", "Text":".txt"}[fmt]
+            self.output_path_edit.setText(os.path.splitext(curr)[0] + ext)
 
-    def get_default_documents_path(self) -> str:
-        """Cross-platform Documents folder"""
-        return os.path.expanduser("~/Documents")
-
-    def show_font_exceptions(self):
+    def _show_font_exceptions(self):
         """Displays an information dialog about font overrides."""
         msg = QMessageBox(self)
         msg.setIcon(QMessageBox.Information)
@@ -456,10 +350,8 @@ class ExportDialog(QDialog):
         msg.setStandardButtons(QMessageBox.Ok)
         msg.exec_()
 
-    def load_settings(self):
-        data = self.settings_manager.load_settings()
-        settings = data["settings"]
-
+    def _load_settings(self):
+        settings = self.settings_manager.load_settings().get("settings", {})
         self.title_edit.setText(settings.get("title") or self.project_name)
         self.author_edit.setText(settings.get("author", "Unknown Author"))
         self.format_combo.setCurrentText(settings.get("format", "EPUB"))
@@ -474,7 +366,6 @@ class ExportDialog(QDialog):
         self.use_scenes_cb.setChecked(settings.get("use_scenes", True))
         self.body_font_combo.setCurrentText(settings.get("body_font_family", "Georgia"))
         self.body_size_combo.setCurrentText(settings.get("body_font_size", "12"))
-
 
         # Load rich heading formats
         for level, editor in [("act", self.act_editor), ("chapter", self.chapter_editor), ("scene", self.scene_editor)]:
@@ -521,9 +412,8 @@ class ExportDialog(QDialog):
             else:
                 self.end_ch_combo.setCurrentIndex(self.end_ch_combo.count() - 1)
 
-
-    def save_current_settings(self):
-        settings = {
+    def _save_settings(self):
+        s = {
             "title": self.title_edit.text().strip(),
             "author": self.author_edit.text().strip(),
             "format": self.format_combo.currentText(),
@@ -548,19 +438,19 @@ class ExportDialog(QDialog):
         # Save rich formats
         for level, editor in [("act", self.act_editor), ("chapter", self.chapter_editor), ("scene", self.scene_editor)]:
             fmt = editor.get_heading_format()
-            settings[f"{level}_heading_format"] = fmt.to_dict()
+            s[f"{level}_heading_format"] = fmt.to_dict()
 
-        self.settings_manager.save_settings(settings)
+        self.settings_manager.save_settings(s)
 
-    def perform_export(self):
-        self.save_current_settings()
-        output_path = self.output_path_edit.text().strip()
-        if not output_path:
+    def _perform_export(self):
+        self._save_settings()
+        path = self.output_path_edit.text().strip()
+        if not path:
             QMessageBox.warning(self, _("Export"), _("Please specify an output file."))
             return
 
-        if os.path.exists(output_path):
-            file_name = os.path.basename(output_path)
+        if os.path.exists(path):
+            file_name = os.path.basename(path)
             reply = QMessageBox.question(
                 self,
                 _("Overwrite File?"),
@@ -570,192 +460,96 @@ class ExportDialog(QDialog):
             )
             if reply == QMessageBox.No:
                 return
-
+        
         fmt = self.format_combo.currentText()
-        title = self.title_edit.text().strip() or self.project_name
-        author = self.author_edit.text().strip() or _("Unknown Author")
+        title = self.title_edit.text() or self.project_name
+        author = self.author_edit.text() or "Unknown"
 
         try:
-            if fmt == "EPUB":
-                self.export_to_epub(output_path, title, author)
-            elif fmt == "HTML":
-                self.export_to_html(output_path, title, author)
-            elif fmt == "Markdown":
-                self.export_to_markdown(output_path, title, author)
-            elif fmt == "PDF":
-                self.export_to_pdf(output_path, title, author)
-            elif fmt == "Text":
-                self.export_to_text(output_path, title, author)
-
-            QMessageBox.information(self, _("Success"), _("Exported successfully to:\n{}").format(output_path))
-            self.exportCompleted.emit(output_path)
+            if fmt == "PDF": 
+                self._export_to_pdf(path, title, author)
+                return
+            if fmt == "EPUB": self._export_to_epub(path, title, author)
+            elif fmt == "HTML": self._export_to_html(path, title, author)
+            elif fmt == "Markdown": self._export_to_markdown(path, title, author)
+            elif fmt == "Text": self._export_to_text(path, title, author)
+            
+            QMessageBox.information(self, _("Success"), _("Exported successfully to:\n{}").format(path))
+            self.exportCompleted.emit(path)
             self.accept()
         except Exception as e:
-            QMessageBox.critical(self, _("Export Failed"), str(e))
+            QMessageBox.critical(self, _("Export Error"), str(e))
 
-    def export_to_epub(self, path: str, title: str, author: str):
-        try:
-            from ebooklib import epub
-            from ebooklib.epub import EpubHtml
-            book = epub.EpubBook()
-            book.set_identifier(f"id_{self.project_name.replace(' ', '_')}")
-            book.set_title(title)
-            book.set_language("en")
-            book.add_author(author)
+    def _export_to_pdf(self, path, title, author):
+        html = self._get_full_project_text("html")
+        font = self.body_font_combo.currentText()
+        size = float(self.body_size_combo.currentText())
+        toc = self.include_toc_cb.isChecked()
 
-            if self.current_cover_path and os.path.exists(self.current_cover_path):
-                with open(self.current_cover_path, "rb") as f:
-                    data = f.read()
-                book.set_cover("cover.jpg", data)
+        self.pd = QProgressDialog(_("Rendering PDF..."), _("Cancel"), 0, 100, None)
+        
+        self.worker = PDFWorker(path, html, title, author, font, size, toc)
+        self.worker.progress.connect(self.pd.setValue)
+        self.pd.canceled.connect(self._on_cancel)
+        self.worker.finished.connect(self._on_pdf_finished)
+        
+        self.hide()
+        self.worker.start()
 
-            full_text = self._get_full_project_text("epub")
-            
-            # Create TOC for EPUB sidebar
-            epub_toc = []
-            for entry in self.toc_entries:
-                epub_toc.append(epub.Link("content.xhtml#"+entry["id"], entry["title"], entry["id"]))
-            
-            book.toc = tuple(epub_toc)
-            
-            # Simple single chapter for now; can be expanded to per-chapter
-            c1 = EpubHtml(title=title, file_name="content.xhtml", lang="en")
-            c1.content = f"""
-            <?xml version="1.0" encoding="utf-8"?>
-            <!DOCTYPE html>
-            <html xmlns="http://www.w3.org/1999/xhtml">
-            <head>
-                <title>{title}</title>
-                <link rel="stylesheet" type="text/css" href="style/nav.css" />
-            </head>
-            <body>
-                <h1>{title}</h1>
-                <p>by {author}</p>
-                {full_text}
-            </body>
-            </html>
-            """
-            book.add_item(c1)
+    def _on_cancel(self):
+        if self.worker.isRunning(): self.worker.request_cancel(); self.worker.wait()
+        self.show()
 
-            # book.toc = (epub.Link("content.xhtml", "Main Content", "content"),)
-            book.spine = ['nav', c1]
-            book.add_item(epub.EpubNcx())
-            book.add_item(epub.EpubNav())
-            epub.write_epub(path, book)
-        except ImportError:
-            raise ImportError("Please pip install EbookLib")
+    def _on_pdf_finished(self, success, msg):
+        self.pd.close()
+        if success:
+            main_window = self.parentWidget()
+            self.exportCompleted.emit(msg)
+            self.accept()
+            QMessageBox.information(main_window, _("Success"), _("Exported to: ") + msg)
+        else:
+            self.show()
+            QMessageBox.critical(self, _("Failed"), msg)
 
-    def export_to_html(self, path: str, title: str, author: str):
-        """Full HTML export."""
-        full_text = self._get_full_project_text("html")
+    def _export_to_html(self, path, title, author):
+        content = self._get_full_project_text("html")
         toc_html = ""
         if self.include_toc_cb.isChecked():
-            toc_links = []
-            for entry in self.toc_entries:
-                margin = (entry['level'] - 1) * 20
-                toc_links.append(f'<li style="margin-left: {margin}px; list-style: none;">'
-                                f'<a href="#{entry["id"]}">{entry["title"]}</a></li>')
-            toc_html = f"<nav><h2>Contents</h2><ul>{''.join(toc_links)}</ul></nav><hr/>"
+            items = [f"<li><a href='#{e['id']}'>{e['title']}</a></li>" for e in self.toc_entries]
+            toc_html = f"<nav><h2>Contents</h2><ul>{''.join(items)}</ul></nav><hr/>"
 
+        full = f"<html><head><meta charset='utf-8'><title>{title}</title>" \
+               f"<style>body{{font-family:serif; max-width:800px; margin:40px auto; line-height:1.6;}}" \
+               f"h1{{text-align:center;}} hr{{margin:40px 0;}}</style></head>" \
+               f"<body><h1>{title}</h1><p>By: {author}</p>{toc_html}{content}</body></html>"
         
-        html_content = f"""<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>{title}</title>
-    <style>
-        body {{ font-family: Georgia, serif; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 20px; }}
-        h1, h2, h3 {{ color: #333; }}
-        hr {{ border: 1px solid #ccc; margin: 30px 0; }}
-    </style>
-</head>
-<body>
-    <h1>{title}</h1>
-    <p><em>by {author}</em></p>
-    {toc_html}
-    {full_text}
-</body>
-</html>"""
+        with open(path, "w", encoding="utf-8") as f: f.write(full)
 
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(html_content)
+    def _export_to_markdown(self, path, title, author):
+        text = self._get_full_project_text("markdown")
+        md = f"# {title}\n\n**By {author}**\n\n{text}"
+        with open(path, "w", encoding="utf-8") as f: f.write(md)
 
-    def export_to_markdown(self, path: str, title: str, author: str):
-        """Full Markdown export."""
-        full_text = self._get_full_project_text("markdown")
+    def _export_to_text(self, path, title, author):
+        text = self._get_full_project_text("text")
+        wrapped = self._wrap_text(f"{title}\nBy {author}\n\n{text}")
+        with open(path, "w", encoding="utf-8") as f: f.write(wrapped)
 
-        md_content = f"""# {title}
-
-By {author}
-
-{full_text}
-"""
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(md_content)
-
-    def export_to_pdf(self, path: str, title: str, author: str):
-        doc = pymupdf.open()
-        fm = FontManager()
-        renderer = RichTextRenderer(doc, fm)
-
-        body_font = self.body_font_combo.currentText()
+    def _export_to_epub(self, path, title, author):
         try:
-            body_size = float(self.body_size_combo.currentText())
-        except ValueError:
-            body_size = 12.0
+            from ebooklib import epub
+            book = epub.EpubBook()
+            book.set_title(title)
+            book.add_author(author)
+            
+            content = self._get_full_project_text("html")
+            c1 = epub.EpubHtml(title=title, file_name='content.xhtml', content=f"<h1>{title}</h1>{content}")
+            book.add_item(c1)
+            book.spine = ['nav', c1]
+            epub.write_epub(path, book)
+        except: raise ImportError("ebooklib required for EPUB")
 
-        full_content_html = self._get_full_project_text(format_type="html")
-        header_html = f"""
-            <h1 style="text-align: center;">{title}</h1>
-            <p style="text-align: center; font-size: 16pt;">By {author}</p>
-            <br/><br/>
-            <hr/>
-            <br/>
-        """
-        styled_html = header_html + full_content_html
-
-        renderer.render_html_block(styled_html, body_font, body_size)
-        if self.include_toc_cb.isChecked():
-            doc.set_toc(renderer.pdf_toc)
-
-        doc.save(path, garbage=3, deflate=True, clean=True)
-        doc.close()
-
-    def export_to_text(self, path: str, title: str, author: str):
-        full_text = self._get_full_project_text(format_type="text")
-        text = f"""{title}
-by {author}
-
-{full_text}
-"""
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(text)
-
-    def _normalize_typography(self, text: str) -> str:
-        """Normalize quotes and other problematic characters for PDF."""
-        if not text:
-            return ""
-
-        # This mapping fixes common "unsupported glyph" issues in basic fonts
-        # by converting specialized punctuation to standard ASCII punctuation.
-        replacements = {
-            '“': '"',   # left double
-            '”': '"',   # right double
-            '‘': "'",   # left single
-            '’': "'",   # right single
-            '—': '-',   # em dash
-            '–': '-',   # en dash
-            '…': '...', # ellipsis
-            '\u00A0': ' ',  # non-breaking space
-            '\u2028': ' ',  # line separator
-            '\u2029': ' ',  # paragraph separator
-        }
-
-        for old, new in replacements.items():
-            text = text.replace(old, new)
-
-        return text
-
-    def _get_full_project_text(self, format_type: str = "text") -> str:
+    def _get_full_project_text(self, format_type):
         """Build complete project text with proper format conversion."""
         if not self.project_model:
             return self._fallback_content_extraction(format_type)
@@ -1058,42 +852,6 @@ by {author}
 
         return str(soup)
 
-    def _fallback_content_extraction(self, format_type: str) -> str:
-        """Fallback when ProjectModel is not available - with proper numbering."""
-        content_parts = []
-
-        use_acts = self.use_acts_cb.isChecked()
-        use_chapters = self.use_chapters_cb.isChecked()
-        use_scenes = self.use_scenes_cb.isChecked()
-
-        for act_idx, act in enumerate(self.acts, 1):
-            if use_acts:
-                heading = self._apply_heading_format(
-                    act, act_idx, self.act_editor, format_type
-                )
-                content_parts.append(heading)
-
-            # Need Act summaries here and for chapters below
-
-            for ch_idx, chapter in enumerate(act.get("chapters", []), 1):
-                if use_chapters:
-                    heading = self._apply_heading_format(
-                        chapter, ch_idx, self.chapter_editor, format_type
-                    )
-                    content_parts.append(heading)
-
-                for sc_idx, scene in enumerate(chapter.get("scenes", []), 1):
-                    if use_scenes:
-                        heading = self._apply_heading_format(
-                            scene, sc_idx, self.scene_editor, format_type
-                        )
-                        content_parts.append(heading)
-
-                    content = scene.get("content", "")
-                    content_parts.append(content)
-
-        return "\n\n".join(content_parts)
-
     def _html_to_plain_text(self, html_content: str) -> str:
         """Convert HTML scene content to clean plain text."""
         if not html_content:
@@ -1143,22 +901,24 @@ by {author}
             paragraphs = [line.strip() for line in text.split('\n') if line.strip()]
         return "\n\n".join(paragraphs)
 
-    def _wrap_text(self, text: str, width: int = 75) -> str:
-        """Wrap text at word boundaries with 75 char width and blank lines between paragraphs."""
-        if not text:
-            return ""
+    def _clean_html_fragment(self, html):
+        soup = BeautifulSoup(html, "html.parser")
+        for tag in soup.find_all(True):
+            if tag.name == 'p' and '-qt-paragraph-type:empty' in tag.get('style', ''):
+                tag.decompose()
+        return str(soup)
 
-        paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
-        wrapped_paragraphs = []
+    def _normalize_typography(self, t):
+        d = {'“':'"', '”':'"', '‘':"'", '’':"'", '—':'-', '–':'-', '…':'...'}
+        for o, n in d.items(): t = t.replace(o, n)
+        return t
 
-        for para in paragraphs:
-            # Wrap each paragraph
-            wrapped = textwrap.fill(para, width=width, break_long_words=False, replace_whitespace=True, drop_whitespace=True)
-            #wrapped = textwrap.fill(para, width=width, break_long_words=False, replace_whitespace=False)
-            wrapped_paragraphs.append(wrapped)
+    def _wrap_text(self, t, w=75):
+        return "\n\n".join([textwrap.fill(p.strip(), width=w) for p in t.split('\n\n') if p.strip()])
 
-        # Join paragraphs with blank line between them
-        return "\n\n".join(wrapped_paragraphs)
+    def get_default_documents_path(self) -> str:
+        """Cross-platform Documents folder"""
+        return os.path.expanduser("~/Documents")
 
     def _html_to_markdown(self, html_content: str) -> str:
         """Simple HTML to Markdown conversion."""
@@ -1183,293 +943,6 @@ by {author}
 
         return '\n'.join(cleaned).strip()
 
-# PDF specific functions
-
-@dataclass
-class TextStyle:
-    """Carries styling state through the HTML tree."""
-    font_family: str
-    font_size: float
-    bold: bool = False
-    italic: bool = False
-    color: tuple[float, float, float] = (0, 0, 0)
-
-class FontManager:
-    """Resolves and caches PyMuPDF Font objects."""
-    def __init__(self):
-        self._font_cache: dict[str, pymupdf.Font] = {} # Stores Font objects for width calc
-        self._faux_italic_flags: dict[str, bool] = {}
-        self._system_fonts_cache: list[str] = []  # Cache of all full paths to font files
-
-    def get_font(self, family: str, bold: bool = False, italic: bool = False) -> tuple[pymupdf.Font, bool]:
-        """Returns a Font object and a unique reference name for it."""
-        key = f"{family.lower()}_{'b' if bold else ''}{'i' if italic else ''}"
-        if key in self._font_cache:
-            return self._font_cache[key], self._faux_italic_flags.get(key, False)
-
-        is_faux_italic = False
-        font_obj = None
-        path = self._resolve_path(family, bold, italic)
-
-        if not path and italic:
-            path = self._resolve_path(family, bold, False)
-            if path:
-                is_faux_italic = True
-
-        if not path and bold:
-            path = self._resolve_path(family, False, False)
-
-        try:
-            font_obj = pymupdf.Font(fontfile=path) if path else pymupdf.Font("helv")
-        except Exception:
-            font_obj = pymupdf.Font("helv")
-
-        self._font_cache[key] = font_obj
-        self._faux_italic_flags[key] = is_faux_italic
-        return font_obj, is_faux_italic
-
-    def _ensure_font_cache(self):
-        """Builds a list of all available system font paths once."""
-        if self._system_fonts_cache:
-            return
-
-        sys_name = platform.system()
-        search_paths = []
-        if sys_name == "Darwin":
-            search_paths = [
-                "/System/Library/Fonts/Supplemental",
-                "/System/Library/Fonts",
-                "/Library/Fonts",
-                os.path.expanduser("~/Library/Fonts")
-            ]
-        elif sys_name == "Windows":
-            search_paths = [os.path.join(os.environ.get('WINDIR', 'C:\\Windows'), 'Fonts')]
-        else:
-            search_paths = ["/usr/share/fonts", "/usr/local/share/fonts"]
-
-        valid_exts = ('.ttf', '.otf', '.ttc', '.otc')
-
-        for base in search_paths:
-            if not os.path.exists(base):
-                continue
-            # os.walk is much more reliable for case-insensitive custom filtering
-            for root, dirs, files in os.walk(base):
-                for f in files:
-                    if f.lower().endswith(valid_exts):
-                        self._system_fonts_cache.append(os.path.join(root, f))
-
-    def _resolve_path(self, family: str, bold: bool, italic: bool) -> str | None:
-        """Discovery logic optimized for macOS Supplemental fonts and case-insensitivity."""
-        self._ensure_font_cache()
-
-        family_tokens = family.lower().split()
-
-        # 2. Search our cached list of full paths
-        # We look for a path where the FILENAME contains all necessary tokens
-        for path in self._system_fonts_cache:
-            filename = os.path.basename(path).lower()
-
-            # Check if all family words (e.g. "arial", "black") are in the filename
-            if not all(token in filename for token in family_tokens):
-                continue
-
-            remainder = filename
-            for t in family_tokens:
-                remainder = remainder.replace(t, "", 1)
-
-            # Define markers. We use common patterns found in font filenames.
-            # We check for markers like 'bold', 'bd', 'italic', 'oblique', 'it', etc.
-            has_bold = any(s in remainder for s in ["bold", " -b", "_b", ".b", "bd"])
-            has_italic = any(s in remainder for s in ["italic", "oblique", " -i", "_i", ".i", " -it", "_it"])
-
-            # Logic: If we requested bold, the file MUST have a bold marker.
-            # If we requested regular, the file MUST NOT have a bold/italic marker.
-            if bold == has_bold and italic == has_italic:
-                return path
-
-        return None
-
-class RichTextRenderer:
-    """Handles HTML parsing and drawing text with word-wrapping."""
-    def __init__(self, doc: pymupdf.Document, font_manager: FontManager):
-        self.doc = doc
-        self.fm = font_manager
-        self.margin = 72
-        self.page_width = 595  # A4
-        self.page_height = 842
-        self.y = self.margin
-        self.current_page = None
-        self._fonts_on_page = set() # OPTIMIZATION: track fonts per page
-        self.pdf_toc = []
-
-    def _new_page(self):
-        self.current_page = self.doc.new_page()
-        self._fonts_on_page = set() # Reset for new page
-        self.y = self.margin
-        self.x = self.margin
-        return self.current_page
-
-    def render_html_block(self, html: str, default_font: str, default_size: float):
-        """Parses HTML into styled runs and draws them with wrapping."""
-        if not self.current_page: self._new_page()
-        soup = BeautifulSoup(html, "html.parser")
-        self._process_node(soup, TextStyle(default_font, default_size))
-
-    def _process_node(self, node, current_style: TextStyle):
-        """Recursive tree walker to handle nested tags and block level spacing."""
-        is_block = hasattr(node, 'name') and node.name in ['p', 'h1', 'h2', 'h3', 'div']
-
-        new_style = self._derive_style(node, current_style)
-
-        # 2. Handle Block Start (Paragraphs/Headings)
-        if is_block:
-            # If node has an ID or we know it's a heading
-            level = 1 if node.name == 'h1' else 2 if node.name == 'h2' else 3
-            if node.name in ['h1', 'h2', 'h3']:
-                self.pdf_toc.append([level, node.get_text(), self.doc.page_count])
-
-            # If we aren't already at the start of a line, move to the next one
-            if self.x != self.margin:
-                self._force_newline(new_style.font_size)
-            # Add small paragraph-top padding
-            self.y += new_style.font_size * 0.2
-
-        # 3. Handle Content
-        if isinstance(node, NavigableString):
-            self._draw_text(str(node), new_style)
-        elif hasattr(node, 'name') and node.name == 'br':
-            self._force_newline(new_style.font_size)
-        elif hasattr(node, 'children'):
-            for child in node.children:
-                self._process_node(child, new_style)
-
-        # 4. Handle Block End
-        if is_block:
-            self._force_newline(new_style.font_size, extra_spacing=new_style.font_size * 0.5)
-
-    def _derive_style(self, node, base: TextStyle) -> TextStyle:
-        if isinstance(node, NavigableString):
-            return base
-
-        raw_style = node.get('style', '')
-        norm_style = raw_style.lower().replace(" ", "")
-
-        # Check tags and inline CSS
-        is_bold = base.bold or node.name in ['b', 'strong', 'h1', 'h2', 'h3'] or "font-weight:bold" in norm_style
-        is_italic = base.italic or node.name in ['i', 'em'] or "font-style:italic" in norm_style
-
-        # Check font family override
-        family = base.font_family
-        lower_raw = raw_style.lower()
-        if "font-family:" in lower_raw:
-            try:
-                # Find the position in the raw string using the lowercase locator
-                start_marker = "font-family:"
-                start_idx = lower_raw.find(start_marker) + len(start_marker)
-
-                # Find the end of the declaration (either ; or end of string)
-                end_idx = raw_style.find(";", start_idx)
-                if end_idx == -1:
-                    end_idx = len(raw_style)
-
-                # Extract the actual value from the RAW string
-                family_val = raw_style[start_idx:end_idx]
-
-                # Handle font stacks (comma separated) and strip quotes/spaces
-                # This preserves "Academy Engraved LET" exactly as it is
-                family = family_val.split(",")[0].strip("'\" ")
-            except Exception:
-                pass
-
-        # Check font size override
-        size = base.font_size
-        if node.name == 'h1': size = base.font_size * 2.0
-        elif node.name == 'h2': size = base.font_size * 1.5
-        elif node.name == 'h3': size = base.font_size * 1.2
-        elif "font-size:" in norm_style:
-            try:
-                # Extract digits for pt/px
-                val = "".join(c for c in norm_style.split("font-size:")[1].split(";")[0] if c.isdigit() or c == '.')
-                size = float(val)
-            except: pass
-
-        return TextStyle(family, size, is_bold, is_italic, base.color)
-
-    def _force_newline(self, font_size: float, extra_spacing: float = 0.0):
-        """Moves cursor to the start of the next line, accounting for font height."""
-        line_height = font_size * 1.4 # Standard typography leading
-        self.x = self.margin
-        self.y += line_height + extra_spacing
-
-        # Check for page break after moving Y
-        if self.y > self.page_height - self.margin:
-            self._new_page()
-
-    def _draw_text(self, text: str, style: TextStyle):
-        if not text: return
-
-        # Normalize newlines to spaces, but do NOT fully strip yet.
-        # Stripping too early removes the space between "word <i>italic</i>"
-        display_text = text.replace('\n', ' ')
-
-        # If we are at the start of a line (x == margin), strip leading whitespace
-        if self.x == self.margin:
-            display_text = display_text.lstrip()
-
-        if not display_text: return
-
-        font_obj, is_faux = self.fm.get_font(style.font_family, style.bold, style.italic)
-        font_id = font_obj.name.replace(" ", "-")
-
-        if font_id not in self._fonts_on_page:
-            self.current_page.insert_font(
-                fontname=font_id, 
-                fontbuffer=font_obj.buffer, 
-                set_simple=False
-            )
-            self._fonts_on_page.add(font_id)
-
-        words = display_text.split(" ")
-
-        for i, word in enumerate(words):
-            # Re-add the space we split on
-            has_trailing_space = i < (len(words) - 1) or text.endswith(" ")
-            word_to_draw = word + (" " if has_trailing_space else "")
-            if not word_to_draw: continue
-            w_len = font_obj.text_length(word_to_draw, fontsize=style.font_size)
-
-            # Internal wrap (if word exceeds line width)
-            if self.x + w_len > self.page_width - self.margin:
-                # Use our new force_newline to move down correctly
-                self._force_newline(style.font_size)
-                if font_id not in self._fonts_on_page:
-                    self.current_page.insert_font(fontname=font_id, fontbuffer=font_obj.buffer, set_simple=False)
-                self._fonts_on_page.add(font_id)
-
-                # Since we just wrapped, re-calculate without the leading space
-                word_to_draw = word_to_draw.lstrip()
-                w_len = font_obj.text_length(word_to_draw, fontsize=style.font_size)
-
-            # --- FAUX ITALIC LOGIC ---
-            insert_pos = pymupdf.Point(self.x, self.y + style.font_size)
-            morph_data = None
-
-            if is_faux:
-                # Apply a skew matrix: Matrix(a, b, c, d, e, f)
-                # c = 0.3 creates a ~15 degree slant
-                skew_matrix = pymupdf.Matrix(1, 0, 0.3, 1, 0, 0)
-                morph_data = (insert_pos, skew_matrix)
-
-            # PyMuPDF insert_text uses the baseline. We adjust y so it doesn't collide with top.
-            self.current_page.insert_text(
-                insert_pos,
-                word_to_draw,
-                fontsize=style.font_size,
-                fontname=font_id,
-                morph=morph_data, # This applies the skew
-            )
-            self.x += w_len
-
 # Markdown specific functions
 class MDConverter(MarkdownConverter):
     def convert_span(self, el, text, convert_as_inline=True, **kwargs):
@@ -1486,6 +959,5 @@ class MDConverter(MarkdownConverter):
     # Fool vulture so it thinks overriden functions are used
     _vulture_hooks = [convert_span]
 
-def show_export_dialog(parent, project_name: str, project_model=None, cover_path=None):
-    dialog = ExportDialog(parent, project_name, project_model, cover_path)
-    dialog.exec_()
+def show_export_dialog(parent, name, model=None, cover_path=None):
+    ExportDialog(parent, name, model, cover_path).exec_()

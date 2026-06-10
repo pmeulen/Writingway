@@ -35,3 +35,5 @@ beautifulsoup4
 python-docx
 markdown
 markdownify
+roman
+kanjize

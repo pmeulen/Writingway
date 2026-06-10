@@ -1,9 +1,11 @@
 import json
 import os
+import logging
 from typing import Any
 
 from settings.settings_manager import WWSettingsManager
 
+logger = logging.getLogger(__name__)
 
 class ExportSettingsManager:
     """
@@ -48,7 +50,7 @@ class ExportSettingsManager:
             return {"version": self.CURRENT_VERSION, "settings": merged}
 
         except Exception as e:
-            print(f"Error loading export settings: {e}")
+            logger.exception("Error loading export settings:")
             return default
 
     def save_settings(self, settings: dict[str, Any]):
@@ -61,7 +63,7 @@ class ExportSettingsManager:
             with open(self.file_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=4, ensure_ascii=False)
         except Exception as e:
-            print(f"Error saving export settings: {e}")
+            logger.exception("Error saving export settings: ")
 
     def _get_default_settings(self) -> dict[str, Any]:
         return {

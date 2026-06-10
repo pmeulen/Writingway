@@ -1,4 +1,14 @@
-# exporter/heading_formatter.py
+
+# Try to import numbering libraries, provide fallbacks if missing
+try:
+    import roman
+except ImportError:
+    roman = None
+
+try:
+    import kanjize
+except ImportError:
+    kanjize = None
 
 
 class HeadingFormatter:
@@ -23,38 +33,19 @@ class HeadingFormatter:
         result = template.replace("{title}", title)
 
         if numbering_index == 1:  # Roman
-            roman = HeadingFormatter._to_roman(number)
+            roman = NumberingUtility.to_roman(number)
             result = result.replace("{num}", roman).replace("{roman}", roman)
         elif numbering_index == 2:  # Kanji
-            kanji = HeadingFormatter._to_kanji(number)
+            kanji = NumberingUtility.to_kanji(number)
             result = result.replace("{num}", kanji).replace("{kanji}", kanji)
         else:  # Arabic
             result = result.replace("{num}", str(number))
 
         # Replace any leftover placeholders
-        result = result.replace("{roman}", HeadingFormatter._to_roman(number))
-        result = result.replace("{kanji}", HeadingFormatter._to_kanji(number))
+        result = result.replace("{roman}", NumberingUtility.to_roman(number))
+        result = result.replace("{kanji}", NumberingUtility.to_kanji(number))
 
         return result
-
-    @staticmethod
-    def _to_roman(num: int) -> str:
-        """Convert integer to Roman numeral."""
-        val = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1]
-        syb = ["M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I"]
-        roman = ''
-        i = 0
-        while num > 0:
-            for _ in range(num // val[i]):
-                roman += syb[i]
-                num -= val[i]
-            i += 1
-        return roman
-
-    @staticmethod
-    def _to_kanji(num: int) -> str:
-        kanji_map = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"]
-        return kanji_map[min(num-1, len(kanji_map)-1)] if num <= 10 else str(num)
 
 class HeadingFormat:
     """Simple data class to hold rich formatting for a heading level."""
@@ -90,3 +81,30 @@ class HeadingFormat:
 
     def get_numbering_index(self) -> int:
         return self.numbering_index
+
+class NumberingUtility:
+    """Handles conversion of integers to various book numbering styles."""
+    
+    @staticmethod
+    def to_roman(n: int) -> str:
+        if roman:
+            try: return roman.toRoman(n)
+            except: pass
+        # Basic fallback for I-X
+        fallback = ["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"]
+        return fallback[n] if n < len(fallback) else str(n)
+
+    @staticmethod
+    def to_kanji(n: int) -> str:
+        if kanjize:
+            try: return kanjize.number2kanji(n)
+            except: pass
+        # Basic fallback
+        fallback = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"]
+        return fallback[n] if n < len(fallback) else str(n)
+
+    @staticmethod
+    def to_word(n: int) -> str:
+        # Simple word fallback for common chapter counts
+        words = ["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten"]
+        return words[n] if n < len(words) else str(n)
