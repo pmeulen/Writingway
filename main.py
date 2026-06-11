@@ -1,3 +1,9 @@
+# Workaround for torch dependency on Windows failing to load lib\c10.dll
+# See: https://github.com/pytorch/pytorch/issues/166628
+try:
+    import torch # load torch before PyQt5
+except ImportError:
+    pass  # torch may not be intalled. Just skip it.
 import importlib.metadata
 import logging
 import sys
