@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Protocol
 from PyQt5.QtWidgets import QComboBox, QHBoxLayout, QLabel, QSizePolicy, QWidget
 
 from compendium.qt_mvp import QtWidgetABCMeta
+from settings.theme_manager import ThemeManager
 
 if TYPE_CHECKING:
     from compendium.compendium_types import CompendiumCoordinator
@@ -76,6 +77,7 @@ class ProjectToolbarPresenter:
         self._workbench_projects_model: WorkbenchProjectsModel | None = None
         self._projects_changed_listener: Callable[[list[str]], None] | None = None
         self._last_selected_project: str | None = None
+        self._current_projects: list[str] = []
 
     def set_view(self, view: IProjectToolbarView) -> None:
         """Give the presenter its View once both objects exist."""
@@ -88,8 +90,14 @@ class ProjectToolbarPresenter:
         self._coordinator.on_project_selected(project_name)
 
     def reset_for_project(self, project_name: str) -> None:
-        """Skeleton: log the project switch. Real behaviour added later."""
+        """Update the current project selection in the toolbar view (if known)."""
         logger.info(f"ProjectToolbarPresenter reset_for_project: {project_name}")
+        if project_name in self._current_projects:
+            self._last_selected_project = project_name
+            if self._view is not None:
+                self._view.populate_projects(self._current_projects, project_name)
+        else:
+            logger.warning(f"reset_for_project called with unknown project: {project_name}")
 
     def load_projects(self, projects: list[str], current_project: str | None = None) -> None:
         """Load project list into the view (called by window or parent)."""
@@ -113,6 +121,8 @@ class ProjectToolbarPresenter:
 
     def _on_projects_changed(self, new_names: list[str]) -> None:
         """Handle project list change notification from the model; preserve selection when possible."""
+        self._current_projects = list(new_names)
+
         # Preserve the last known good selection when possible
         preserved = None
         if self._last_selected_project and self._last_selected_project in new_names:
@@ -150,6 +160,8 @@ class ProjectToolbarWidget(QWidget, IProjectToolbarView, metaclass=QtWidgetABCMe
         """Build the toolbar widgets. Ported from EnhancedCompendiumWindow."""
         # Note: Since this is now a QWidget pane, we use a layout instead
         # of being a QMainWindow toolBar.
+        self.setStyleSheet(ThemeManager.get_menu_stylesheet())
+
         self.main_layout = QHBoxLayout(self)
         self.main_layout.setContentsMargins(5, 5, 5, 5)
         self.main_layout.setSpacing(10)

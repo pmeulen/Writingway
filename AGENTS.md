@@ -84,6 +84,7 @@ Compendium data is stored in `Projects/<project>/compendium.json` and is managed
 - Test runner: **pytest** + **pytest-qt** (Qt fixtures) + **pytest-cov** (coverage).
 - Run all tests from the repo root: `python -m pytest tests/`.
 - Configuration lives in `pytest.ini`.
+- virtual env with all dev dependencies is in `venv/` (created by `source setup_writingway.sh`); activate with `source venv/bin/activate`.
 - Tests are under `tests/`, mirroring the source package layout — e.g. `tests/compendium/` covers `compendium/`, `tests/settings/` covers `settings/`.
 - Always write unit tests and check that they pass for new features.
 - Test both positive and negative scenarios

@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from gettext import gettext as _
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
@@ -35,6 +35,7 @@ from PyQt5.QtWidgets import (
 )
 
 from compendium.qt_mvp import QtWidgetABCMeta
+from settings.theme_manager import ThemeManager
 
 if TYPE_CHECKING:
     from compendium.compendium_manager import CompendiumManager
@@ -62,6 +63,16 @@ class ICompendiumTreeView(ABC):
     @abstractmethod
     def filter_visible(self, visible_uuids: set[str]) -> None:
         """Hide/show entries so that only those whose uuid is in *visible_uuids* remain visible."""
+        ...
+
+    @abstractmethod
+    def request_text(self, title: str, label: str, initial_text: str = "") -> str | None:
+        """Ask the user for text and return it, or ``None`` when cancelled."""
+        ...
+
+    @abstractmethod
+    def request_confirmation(self, title: str, message: str) -> bool:
+        """Ask the user for confirmation and return ``True`` only when accepted."""
         ...
 
 
@@ -103,15 +114,23 @@ class CompendiumTreeEvents(Protocol):
         """User asked to move the entry up/down within its category."""
         ...
 
+    def on_move_to_category_requested(self, entry_uuid: str, target_category_uuid: str) -> None:
+        """User asked to move the entry to a new category."""
+        ...
+
+    def get_other_categories(self, current_category_uuid: str) -> list[dict[str, Any]]:
+        """Return all categories except the one provided."""
+        ...
+
 
 # ---------------------------------------------------------------------------
 # CompendiumTreePresenter (PyQt-free)
 # ---------------------------------------------------------------------------
 class CompendiumTreePresenter:
-    """PyQt-free presenter for the compendium tree pane.
+    """Presenter for the compendium tree pane.
 
-    Connects to the ``CompendiumManager`` model and reports cross-pane intents
-    to the coordinating presenter.  Currently a skeleton.
+    Connects to the CompendiumManager model and reports cross-pane intents
+    to the coordinating presenter.
     """
 
     def __init__(self, compendium: CompendiumManager, coordinator: CompendiumCoordinator) -> None:
@@ -152,64 +171,53 @@ class CompendiumTreePresenter:
     def on_entry_selected(self, entry_uuid: str) -> None:
         """Forward selection of an entry to the coordinator."""
         logger.debug(f"CompendiumTreePresenter on_entry_selected: {entry_uuid}")
-        if hasattr(self._coordinator, "on_entry_selected"):
-            self._coordinator.on_entry_selected(entry_uuid)
+        self._coordinator.on_entry_selected(entry_uuid)
 
     def on_category_selected(self, category_uuid: str) -> None:
         """Forward selection of a category to the coordinator."""
         logger.debug(f"CompendiumTreePresenter on_category_selected: {category_uuid}")
-        if hasattr(self._coordinator, "on_category_selected"):
-            self._coordinator.on_category_selected(category_uuid)
 
     def on_new_category_requested(self) -> None:
         """Forward 'create new category' intent to coordinator (or perform locally for tests)."""
         logger.debug("CompendiumTreePresenter on_new_category_requested")
-        if hasattr(self._coordinator, "on_new_category_requested"):
-            self._coordinator.on_new_category_requested()
-        else:
-            self._perform_new_category()
+        self._perform_new_category()
 
     def on_new_entry_requested(self, category_uuid: str) -> None:
         """Forward 'create new entry under category' intent."""
         logger.debug(f"CompendiumTreePresenter on_new_entry_requested: {category_uuid}")
-        if hasattr(self._coordinator, "on_new_entry_requested"):
-            self._coordinator.on_new_entry_requested(category_uuid)
-        else:
-            self._perform_new_entry(category_uuid)
+        self._perform_new_entry(category_uuid)
 
     def on_rename_requested(self, uuid: str, item_type: str) -> None:
         """Forward rename intent for category or entry."""
         logger.debug(f"CompendiumTreePresenter on_rename_requested: {item_type} {uuid}")
-        if hasattr(self._coordinator, "on_rename_requested"):
-            self._coordinator.on_rename_requested(uuid, item_type)
-        else:
-            self._perform_rename(uuid, item_type)
+        self._perform_rename(uuid, item_type)
 
     def on_delete_requested(self, uuid: str, item_type: str) -> None:
         """Forward delete intent for category or entry."""
         logger.debug(f"CompendiumTreePresenter on_delete_requested: {item_type} {uuid}")
-        if hasattr(self._coordinator, "on_delete_requested"):
-            self._coordinator.on_delete_requested(uuid, item_type)
-        else:
-            self._perform_delete(uuid, item_type)
+        self._perform_delete(uuid, item_type)
 
     def on_move_requested(self, entry_uuid: str, direction: str) -> None:
         """Forward reorder (move up/down) intent."""
         logger.debug(f"CompendiumTreePresenter on_move_requested: {direction} {entry_uuid}")
-        if hasattr(self._coordinator, "on_move_requested"):
-            self._coordinator.on_move_requested(entry_uuid, direction)
-        else:
-            self._perform_move(entry_uuid, direction)
+        self._perform_move(entry_uuid, direction)
 
-    # -----------------------------------------------------------------------
-    # CRUD implementations (Stage 5) – these are invoked by the coordinator
-    # -----------------------------------------------------------------------
+    def on_move_to_category_requested(self, entry_uuid: str, target_category_uuid: str) -> None:
+        """Forward move entry to category intent."""
+        logger.debug(f"CompendiumTreePresenter on_move_to_category_requested: {entry_uuid} to {target_category_uuid}")
+        self._perform_move_to_category(entry_uuid, target_category_uuid)
+
+    def get_other_categories(self, current_category_uuid: str) -> list[dict[str, Any]]:
+        """Return all categories except the one provided."""
+        data = self._compendium.load_data()
+        return [cat for cat in data.get("categories", []) if cat.get("uuid") != current_category_uuid]
+
     def _perform_new_category(self) -> None:
         """Ask user for name, call manager, then refresh tree."""
         if self._view is None:
             return
-        name, ok = QInputDialog.getText(None, _("New Category"), _("Category name:"))
-        if ok and name:
+        name = self._view.request_text(_("New Category"), _("Category name:"))
+        if name:
             self._compendium.add_category(name)
             data = self._compendium.load_data()
             self._view.populate_tree(data)
@@ -218,8 +226,8 @@ class CompendiumTreePresenter:
         """Prompt for entry name and add under the given category."""
         if self._view is None:
             return
-        name, ok = QInputDialog.getText(None, _("New Entry"), _("Entry name:"))
-        if ok and name:
+        name = self._view.request_text(_("New Entry"), _("Entry name:"))
+        if name:
             self._compendium.add_entry(category_uuid, name)
             data = self._compendium.load_data()
             self._view.populate_tree(data)
@@ -242,8 +250,12 @@ class CompendiumTreePresenter:
                     if ent.get("uuid") == uuid:
                         current_name = ent.get("name", "")
                         break
-        new_text, ok = QInputDialog.getText(None, _("Rename {}").format(item_type.capitalize()), _("New name:"), text=current_name)
-        if ok and new_text:
+        new_text = self._view.request_text(
+            _("Rename {}").format(item_type.capitalize()),
+            _("New name:"),
+            current_name,
+        )
+        if new_text:
             if item_type == "entry":
                 self._compendium.rename_entry(uuid, new_text)
             else:
@@ -255,13 +267,10 @@ class CompendiumTreePresenter:
         """Delete after confirmation."""
         if self._view is None:
             return
-        confirm = QMessageBox.question(
-            None,
+        if self._view.request_confirmation(
             _("Confirm Deletion"),
             _("Are you sure you want to delete the {}?").format(item_type),
-            QMessageBox.Yes | QMessageBox.No,
-        )
-        if confirm == QMessageBox.Yes:
+        ):
             if item_type == "entry":
                 self._compendium.remove_entry(uuid)
             else:
@@ -270,8 +279,8 @@ class CompendiumTreePresenter:
             self._view.populate_tree(refreshed)
 
     def _perform_move(self, entry_uuid: str, direction: str) -> None:
-        """Reorder entry or move to another category (MVP treats 'to_category' as no-op for now)."""
-        if self._view is None or direction == "to_category":
+        """Reorder entry."""
+        if self._view is None:
             return
         data = self._compendium.load_data()
         for cat in data.get("categories", []):
@@ -284,6 +293,14 @@ class CompendiumTreePresenter:
                         refreshed = self._compendium.load_data()
                         self._view.populate_tree(refreshed)
                     return
+
+    def _perform_move_to_category(self, entry_uuid: str, target_category_uuid: str) -> None:
+        """Move entry to another category and refresh."""
+        if self._view is None:
+            return
+        self._compendium.move_entry(entry_uuid, target_category_uuid)
+        refreshed = self._compendium.load_data()
+        self._view.populate_tree(refreshed)
 
 
 # ---------------------------------------------------------------------------
@@ -385,6 +402,27 @@ class CompendiumTreeWidget(QWidget, ICompendiumTreeView, metaclass=QtWidgetABCMe
             cat_item.setHidden(not cat_visible)
         self.tree.blockSignals(False)
 
+    def request_text(self, title: str, label: str, initial_text: str = "") -> str | None:
+        """Show a text input dialog and return trimmed text, or ``None`` on cancel/empty."""
+        text, accepted = QInputDialog.getText(self, title, label, text=initial_text)
+        if not accepted:
+            return None
+        cleaned_text = text.strip()
+        if not cleaned_text:
+            return None
+        return cleaned_text
+
+    def request_confirmation(self, title: str, message: str) -> bool:
+        """Show a yes/no confirmation dialog."""
+        confirm = QMessageBox.question(
+            self,
+            title,
+            message,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return confirm == QMessageBox.StandardButton.Yes
+
     def _on_search_bar_text_changed(self, text: str) -> None:
         """Forward search text to presenter (which delegates to manager.find_entries + filter_visible)."""
         if hasattr(self._events, "on_search_text_changed"):
@@ -417,7 +455,7 @@ class CompendiumTreeWidget(QWidget, ICompendiumTreeView, metaclass=QtWidgetABCMe
 
         item = self.tree.itemAt(pos)
         menu = QMenu(self)
-        # The ThemeManager stylesheet is optional for MVP; skip for simplicity
+        menu.setStyleSheet(ThemeManager.get_menu_stylesheet())
         if item is not None:
             data = item.data(0, Qt.ItemDataRole.UserRole) or {}
             uuid = data.get("uuid", "")
@@ -440,9 +478,16 @@ class CompendiumTreeWidget(QWidget, ICompendiumTreeView, metaclass=QtWidgetABCMe
                 if idx >= parent.childCount() - 1:
                     move_down.setEnabled(False)
                 # Move-to-Category disabled when <2 categories (mirrors legacy)
-                move_cat = menu.addAction(_("Move to Category"), lambda: self._request_move_to_category(uuid))
-                if self.tree.topLevelItemCount() < 2:
-                    move_cat.setEnabled(False)
+                move_cat_menu = QMenu(_("Move to Category"), self)
+                categories = self._events.get_other_categories(parent.data(0, Qt.ItemDataRole.UserRole).get("uuid", ""))
+                if len(categories) < 1:
+                    move_cat_menu.setEnabled(False)
+                else:
+                    for cat in categories:
+                        cat_uuid = cat.get("uuid")
+                        cat_name = cat.get("name")
+                        action = move_cat_menu.addAction(cat_name, lambda uuid=cat_uuid: self._request_move_to_category(uuid))
+                menu.addMenu(move_cat_menu)
         else:
             # Clicked empty space → New Category only
             menu.addAction(_("New Category"), self._request_new_category)
@@ -458,8 +503,7 @@ class CompendiumTreeWidget(QWidget, ICompendiumTreeView, metaclass=QtWidgetABCMe
             self._events.on_new_entry_requested(category_uuid)
 
     def _request_rename(self, uuid: str, item_type: str) -> None:
-        if hasattr(self._events, "on_rename_requested"):
-            self._events.on_rename_requested(uuid, item_type)
+        self._events.on_rename_requested(uuid, item_type)
 
     def _request_delete(self, uuid: str, item_type: str) -> None:
         if hasattr(self._events, "on_delete_requested"):
@@ -469,7 +513,12 @@ class CompendiumTreeWidget(QWidget, ICompendiumTreeView, metaclass=QtWidgetABCMe
         if hasattr(self._events, "on_move_requested"):
             self._events.on_move_requested(entry_uuid, direction)
 
-    def _request_move_to_category(self, entry_uuid: str) -> None:
-        # MVP scope: treat identically to the other CRUD handlers (presenter decides)
-        if hasattr(self._events, "on_move_requested"):
-            self._events.on_move_requested(entry_uuid, "to_category")
+    def _request_move_to_category(self, target_category_uuid: str) -> None:
+        # Access the currently selected item to get the entry's UUID
+        current_item = self.tree.currentItem()
+        if current_item:
+            data = current_item.data(0, Qt.ItemDataRole.UserRole)
+            if data:
+                entry_uuid = data.get("uuid")
+                if entry_uuid and hasattr(self._events, "on_move_to_category_requested"):
+                    self._events.on_move_to_category_requested(entry_uuid, target_category_uuid)

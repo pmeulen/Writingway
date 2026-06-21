@@ -152,9 +152,36 @@ def test_project_toolbar_presenter_on_project_selected_forwards_to_coordinator()
     presenter = ProjectToolbarPresenter(coordinator)
 
     presenter.on_project_selected("Gamma")
-
     assert presenter._last_selected_project == "Gamma"
     coordinator.on_project_selected.assert_called_once_with("Gamma")
+
+
+@pytest.mark.unit
+def test_project_toolbar_presenter_reset_for_project_updates_selection() -> None:
+    """reset_for_project selects the project in the view when the project is known."""
+    coordinator = MagicMock()
+    presenter = ProjectToolbarPresenter(coordinator)
+    mock_view = MagicMock()
+    presenter.set_view(mock_view)
+    # Seed initial project list
+    presenter._current_projects = ["Alpha", "Beta", "Gamma"]
+
+    presenter.reset_for_project("Beta")
+
+    assert presenter._last_selected_project == "Beta"
+    mock_view.populate_projects.assert_called_once_with(["Alpha", "Beta", "Gamma"], "Beta")
+
+
+@pytest.mark.unit
+def test_project_toolbar_presenter_reset_for_project_unknown_logs_warning(caplog: pytest.LogCaptureFixture) -> None:
+    """reset_for_project warns when project name is not in the known list."""
+    coordinator = MagicMock()
+    presenter = ProjectToolbarPresenter(coordinator)
+    caplog.set_level(logging.WARNING)
+
+    presenter.reset_for_project("UnknownProject")
+
+    assert any("unknown project" in rec.message for rec in caplog.records)
 
 
 @pytest.mark.unit

@@ -94,6 +94,130 @@ def test_tree_widget_populate_renders_categories_and_entries(qtbot) -> None:
     assert first_entry.data(0, Qt.ItemDataRole.UserRole)["name"] == "Alice"
 
 
+@pytest.mark.unit
+def test_presenter_move_to_category_requests() -> None:
+    """Verify presenter calls manager.move_entry and view.populate_tree."""
+    from unittest.mock import MagicMock
+    fake_manager = MagicMock()
+    mock_view = MagicMock()
+    presenter = CompendiumTreePresenter(fake_manager, coordinator=_FakeCoordinator())
+    presenter.set_view(mock_view)
+
+    presenter.on_move_to_category_requested("e1", "c2")
+
+    fake_manager.move_entry.assert_called_once_with("e1", "c2")
+    fake_manager.load_data.assert_called()
+    mock_view.populate_tree.assert_called()
+
+
+@pytest.mark.unit
+def test_presenter_get_other_categories() -> None:
+    """Verify get_other_categories filters out the current category."""
+    from unittest.mock import MagicMock
+    fake_manager = MagicMock()
+    fake_manager.load_data.return_value = {
+        "categories": [
+            {"uuid": "c1", "name": "A"},
+            {"uuid": "c2", "name": "B"},
+        ]
+    }
+    presenter = CompendiumTreePresenter(fake_manager, coordinator=_FakeCoordinator())
+
+    others = presenter.get_other_categories("c1")
+    assert len(others) == 1
+    assert others[0]["uuid"] == "c2"
+
+
+@pytest.mark.unit
+def test_presenter_new_category_uses_view_prompt_and_refreshes() -> None:
+    """Creating a category uses the view input API and refreshes tree data."""
+    from unittest.mock import MagicMock
+
+    fake_manager = MagicMock()
+    fake_manager.load_data.return_value = {"version": 3, "categories": []}
+    mock_view = MagicMock()
+    mock_view.request_text.return_value = "Worldbuilding"
+
+    presenter = CompendiumTreePresenter(fake_manager, coordinator=_FakeCoordinator())
+    presenter.set_view(mock_view)
+
+    presenter.on_new_category_requested()
+
+    mock_view.request_text.assert_called_once()
+    fake_manager.add_category.assert_called_once_with("Worldbuilding")
+    mock_view.populate_tree.assert_called_once()
+
+
+@pytest.mark.unit
+def test_presenter_new_entry_cancelled_does_not_mutate() -> None:
+    """Cancelling entry name input must not call manager mutation methods."""
+    from unittest.mock import MagicMock
+
+    fake_manager = MagicMock()
+    mock_view = MagicMock()
+    mock_view.request_text.return_value = None
+
+    presenter = CompendiumTreePresenter(fake_manager, coordinator=_FakeCoordinator())
+    presenter.set_view(mock_view)
+
+    presenter.on_new_entry_requested("c1")
+
+    fake_manager.add_entry.assert_not_called()
+    mock_view.populate_tree.assert_not_called()
+
+
+@pytest.mark.unit
+def test_presenter_delete_requires_confirmation() -> None:
+    """Delete actions are guarded by view confirmation prompts."""
+    from unittest.mock import MagicMock
+
+    fake_manager = MagicMock()
+    fake_manager.load_data.return_value = {"version": 3, "categories": []}
+    mock_view = MagicMock()
+
+    presenter = CompendiumTreePresenter(fake_manager, coordinator=_FakeCoordinator())
+    presenter.set_view(mock_view)
+
+    mock_view.request_confirmation.return_value = False
+    presenter.on_delete_requested("e1", "entry")
+    fake_manager.remove_entry.assert_not_called()
+
+    mock_view.request_confirmation.return_value = True
+    presenter.on_delete_requested("e1", "entry")
+    fake_manager.remove_entry.assert_called_once_with("e1")
+    mock_view.populate_tree.assert_called_once()
+
+
+@pytest.mark.unit
+def test_presenter_rename_uses_view_input_with_existing_name() -> None:
+    """Rename pre-fills current value and applies only accepted input."""
+    from unittest.mock import MagicMock
+
+    fake_manager = MagicMock()
+    fake_manager.load_data.return_value = {
+        "version": 3,
+        "categories": [
+            {
+                "uuid": "c1",
+                "name": "Characters",
+                "entries": [
+                    {"uuid": "e1", "name": "Alice", "content": "", "details": "", "tags": [], "relationships": [], "images": []},
+                ],
+            }
+        ],
+    }
+    mock_view = MagicMock()
+    mock_view.request_text.return_value = "Alice Prime"
+
+    presenter = CompendiumTreePresenter(fake_manager, coordinator=_FakeCoordinator())
+    presenter.set_view(mock_view)
+
+    presenter.on_rename_requested("e1", "entry")
+
+    mock_view.request_text.assert_called_once_with("Rename Entry", "New name:", "Alice")
+    fake_manager.rename_entry.assert_called_once_with("e1", "Alice Prime")
+
+
 @pytest.mark.qt
 def test_tree_search_filters_entries(qtbot) -> None:
     """Typing search text ultimately ends up calling filter_visible on the widget and only matching UUIDs stay visible."""
@@ -243,7 +367,8 @@ def test_open_with_entry_triggers_tree_reset_for_project(compendium_manager, qtb
 
         tree_presenter = win.presenter.tree_presenter
         # Before the call, project_name must be None (the window was created without a selected project)
-        assert tree_presenter._project_name is None
+        # verify that tree_presenter._project_name is initialized to an empty string
+        assert tree_presenter._project_name == ""
 
         # Execute the method under test – it must bubble down to the tree pane
         win.open_with_entry("ProjectX", None)

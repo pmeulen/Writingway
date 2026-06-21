@@ -841,18 +841,12 @@ class ProjectWindow(QMainWindow):
 
     def open_enhanced_compendium2(self):
         """Open the enhanced compendium 2 for this project, or focus it if already visible."""
-        if not self.enhanced_window:
+        if not self.enhanced_window2:
             QMessageBox.warning(self, _("Compendium"), _("Enhanced Compendium 2 is not available."))
             return
 
-        if self.enhanced_window2.isVisible():
-            self.enhanced_window2._ensure_window_visible()
-            if self.enhanced_window2.project_name != self.model.project_name:
-                self.enhanced_window2.open_with_entry(self.model.project_name, None)
-            return
-
+        self.enhanced_window2.ensure_window_visible()
         self.enhanced_window2.open_with_entry(self.model.project_name, None)
-
 
     def repopulate_prompts(self):
         self.bottom_stack.prose_prompt_panel.repopulate_prompts()

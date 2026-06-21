@@ -60,7 +60,7 @@ class EnhancedCompendiumWindow2(QMainWindow):
         self.setWindowTitle(_("Enhanced Compendium 2"))
         self.resize(900, 700)
 
-    def open_with_entry(self, project_name: str, entry_uuid: str | None) -> None:
+    def open_with_entry(self, project_name: str | None, entry_uuid: str | None) -> None:
         # TODO: Switch projects to uuid
         """Make visible and raise window. Switch to "project" if needed. Then select "entry_uuid" in that project."""
 
@@ -70,9 +70,9 @@ class EnhancedCompendiumWindow2(QMainWindow):
             self.presenter.switch_to_project(project_name)
 
         # Show the window before prompting so the dialog context is obvious.
-        self._ensure_window_visible()
+        self.ensure_window_visible()
 
-    def _ensure_window_visible(self) -> None:
+    def ensure_window_visible(self) -> None:
         """Ensure this window is restored, visible, and focused for user prompts."""
         if self.isMinimized():
             self.showNormal()

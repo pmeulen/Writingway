@@ -62,9 +62,8 @@ class CompendiumWindowPresenter:
     """Coordinating presenter for the Enhanced Compendium window.
 
     Owns the three child presenters and mediates *cross-pane* events only.  It
-    also holds the composition ``ICompendiumWindowView`` it drives.  Implements
-    the ``CompendiumCoordinator`` Protocol (see ``compendium_types``).  Currently
-    a skeleton: cross-pane behaviour will be added in later steps.
+    also holds the composition `ICompendiumWindowView` it drives.  Implements
+    the `CompendiumCoordinator` Protocol (see `compendium_types`).
     """
 
     def __init__(self, project_name: str | None) -> None:
@@ -92,8 +91,9 @@ class CompendiumWindowPresenter:
         else:
             self._compendium = CompendiumManager(self._project_name, event_bus=self._event_bus)
 
-        self._window_view: ICompendiumWindowView | None = None
-        # The coordinator owns the three child presenters and is their coordinator.
+        self._window_view: ICompendiumWindowView | None = None  # Composes the three panes
+
+        # The CompendiumWindowPresenter is a coordinator and owns the three child presenters
         self._toolbar = ProjectToolbarPresenter(coordinator=self)
         self._tree = CompendiumTreePresenter(self._compendium, coordinator=self)
         self._editor = EntryEditorPresenter(self._compendium, coordinator=self)
